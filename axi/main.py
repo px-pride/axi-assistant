@@ -543,11 +543,11 @@ async def _recover_stranded_messages() -> None:
 
 
 async def _auto_sleep_idle_agents(now_utc: datetime) -> None:
-    """Put idle awake agents to sleep after 1 minute of inactivity.
+    """Put idle awake agents to sleep after IDLE_SLEEP_SECONDS of inactivity.
 
     Scheduler handles eviction under pressure; this is just cleanup.
     """
-    idle_threshold = timedelta(minutes=1)
+    idle_threshold = timedelta(seconds=config.IDLE_SLEEP_SECONDS)
 
     for agent_name, session in list(agents.agents.items()):
         if session.client is None:
@@ -609,6 +609,22 @@ async def _interrupt_agent(session: AgentSession) -> None:
     # Graceful interrupt failed — fall back to killing the CLI process
     log.warning("Graceful interrupt failed for '%s', falling back to process kill", session.name)
     await agents.interrupt_session(session)
+
+
+# ---------------------------------------------------------------------------
+# Slash command error handler
+# ---------------------------------------------------------------------------
+
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+    """Log slash command errors to our logger (discord.py's default goes to its own silent logger)."""
+    command_name = interaction.command.name if interaction.command else "unknown"
+    log.error("Slash command /%s error: %s", command_name, error, exc_info=error)
+    if not interaction.response.is_done():
+        await interaction.response.send_message(
+            f"*System:* Command failed: {error}", ephemeral=True
+        )
 
 
 # ---------------------------------------------------------------------------

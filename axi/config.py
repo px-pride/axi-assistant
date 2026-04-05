@@ -142,6 +142,9 @@ CLEAN_TOOL_MESSAGES = os.environ.get("CLEAN_TOOL_MESSAGES", "").lower() in ("1",
 # Default 0.80 (80%). Set lower to compact earlier, higher to use more context before compacting.
 COMPACT_THRESHOLD = float(os.environ.get("COMPACT_THRESHOLD", "0.80"))
 
+# Idle sleep threshold — seconds of inactivity before auto-sleeping an awake agent.
+IDLE_SLEEP_SECONDS = int(os.environ.get("IDLE_SLEEP_SECONDS", "60"))
+
 # Streaming edit interval in seconds — how often to edit the Discord message with new content.
 # Must stay well under Discord's per-channel rate limit (~5 req/5s).
 STREAMING_EDIT_INTERVAL = float(os.environ.get("STREAMING_EDIT_INTERVAL", "1.5"))

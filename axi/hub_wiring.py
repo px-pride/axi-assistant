@@ -54,7 +54,7 @@ def _make_agent_options(session: AgentSession, resume_id: str | None) -> Any:
         mcp_servers=session.mcp_servers or {},
         disallowed_tools=[],
         extra_args={"debug-to-stderr": None},
-        env={"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "100"},
+        env={"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "100", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
     )
 
 
