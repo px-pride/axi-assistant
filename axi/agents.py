@@ -1051,6 +1051,8 @@ async def _rebuild_session(name: str, *, cwd: str | None = None, session_id: str
     old_cwd = session.cwd if session else config.DEFAULT_CWD
     old_channel_id = discord_state(session).channel_id if session else None
     old_mcp = getattr(session, "mcp_servers", None)
+    old_agent_type = session.agent_type if session else "flowcoder"
+    old_mcp_names = session.mcp_server_names if session else None
     resolved_cwd = cwd or old_cwd
     prompt = (
         session.system_prompt if session and session.system_prompt else make_spawned_agent_system_prompt(resolved_cwd, agent_name=name)
@@ -1059,12 +1061,14 @@ async def _rebuild_session(name: str, *, cwd: str | None = None, session_id: str
     await end_session(name)
     new_session = AgentSession(
         name=name,
+        agent_type=old_agent_type,
         cwd=resolved_cwd,
         system_prompt=prompt,
         system_prompt_hash=prompt_hash,
         client=None,
         session_id=session_id,
         mcp_servers=old_mcp,
+        mcp_server_names=old_mcp_names,
     )
     discord_state(new_session).channel_id = old_channel_id
     agents[name] = new_session

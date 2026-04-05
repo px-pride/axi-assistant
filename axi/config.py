@@ -142,6 +142,13 @@ for _fc_logger_name in ("src.controllers", "src.services", "src.embedding"):
     _fc_logger.addHandler(_console_handler)
     _fc_logger.addHandler(_file_handler)
 
+# Route agenthub and claudewire loggers so wake/transport errors are visible.
+for _pkg_logger_name in ("agenthub", "claudewire"):
+    _pkg_logger = logging.getLogger(_pkg_logger_name)
+    _pkg_logger.setLevel(logging.DEBUG)
+    _pkg_logger.addHandler(_console_handler)
+    _pkg_logger.addHandler(_file_handler)
+
 # ---------------------------------------------------------------------------
 # Feature flags
 # ---------------------------------------------------------------------------
