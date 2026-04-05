@@ -1,0 +1,336 @@
+{
+  "id": "ad000002-deck-4000-8000-auto00000002",
+  "name": "mil",
+  "description": "Automatically execute cards from a deck with minimal human approval — only stops for very complex/ambiguous plans or critical research findings.",
+  "flowchart": {
+    "blocks": {
+      "b0000001-start-4000-8000-000000000001": {
+        "id": "b0000001-start-4000-8000-000000000001",
+        "type": "start",
+        "name": "START",
+        "position": { "x": 150, "y": 50 }
+      },
+      "b0000002-get-4000-8000-000000000002": {
+        "id": "b0000002-get-4000-8000-000000000002",
+        "type": "prompt",
+        "name": "GET TOP CARD",
+        "position": { "x": 150, "y": 150 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nUse the minflow CLI to find the deck matching \"$1\" (run `minflow deck list` then `minflow deck get <id>`) and get its top (first) incomplete card.\n\nAlso extract the deck's text fields: description, done, and notes. These provide project context for executing the card.\n\nReturn the card information as structured output. Set has_card to true if there is an incomplete card, or false if the deck is empty or all cards are complete.",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "card_id": { "type": "string" },
+            "card_text": { "type": "string" },
+            "deck_id": { "type": "string" },
+            "has_card": { "type": "boolean" },
+            "deck_description": { "type": "string" },
+            "deck_done": { "type": "string" },
+            "deck_notes": { "type": "string" }
+          },
+          "required": ["has_card"]
+        },
+        "sound_effect": null,
+        "disable_auto_git": true
+      },
+      "b0000003-hasc-4000-8000-000000000003": {
+        "id": "b0000003-hasc-4000-8000-000000000003",
+        "type": "branch",
+        "name": "HAS CARD?",
+        "position": { "x": 150, "y": 270 },
+        "condition": "has_card"
+      },
+      "b0000004-exec-4000-8000-000000000004": {
+        "id": "b0000004-exec-4000-8000-000000000004",
+        "type": "prompt",
+        "name": "EXECUTE CARD",
+        "position": { "x": 150, "y": 370 },
+        "prompt": "[Automated flowchart step — output goes to the user.]\n\nDeck context (read before starting):\n- Project: {{deck_description}}\n- Completed so far: {{deck_done}}\n- Notes: {{deck_notes}}\n\nExecute this task to the best of your ability:\n\n{{card_text}}\n\nWork thoroughly and completely. When finished, describe what you accomplished.",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "b0000005-chk-4000-8000-000000000005": {
+        "id": "b0000005-chk-4000-8000-000000000005",
+        "type": "prompt",
+        "name": "CHECK APPROVAL",
+        "position": { "x": 150, "y": 490 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nYou just worked on: {{card_text}}\n\nDetermine whether this work can be automatically marked complete, or whether it requires human review/approval.\n\nDefault to auto-completing. Only require approval in these cases:\n- Plan tasks: require approval ONLY if the plan involves very complex architecture or genuinely ambiguous requirements where you could easily go the wrong direction. Straightforward plans should auto-complete.\n- Research tasks: auto-complete UNLESS you uncovered something highly pertinent that the user would want to act on immediately (e.g. a critical finding, a decision point, something that changes project direction). Routine research summaries auto-complete.\n- Failed or incomplete work: ALWAYS requires approval\n\nEverything else (implementation, testing, git operations, etc.) should auto-complete.\n\nBias strongly toward auto-completing. The user wants momentum, not gatekeeping.",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "auto_completable": { "type": "boolean" },
+            "reason": { "type": "string" }
+          },
+          "required": ["auto_completable", "reason"]
+        },
+        "sound_effect": null,
+        "disable_auto_git": true
+      },
+      "b0000006-appr-4000-8000-000000000006": {
+        "id": "b0000006-appr-4000-8000-000000000006",
+        "type": "branch",
+        "name": "AUTO-COMPLETABLE?",
+        "position": { "x": 150, "y": 610 },
+        "condition": "auto_completable"
+      },
+      "b0000007-mark-4000-8000-000000000007": {
+        "id": "b0000007-mark-4000-8000-000000000007",
+        "type": "prompt",
+        "name": "MARK COMPLETE",
+        "position": { "x": 150, "y": 730 },
+        "prompt": "[Automated flowchart step — output goes to the user.]\n\nRun `minflow card done {{deck_id}} {{card_id}}` to mark the card as complete.\n\nBriefly confirm to the user that \"{{card_text}}\" has been auto-completed.",
+        "output_schema": null,
+        "sound_effect": null,
+        "disable_auto_git": true
+      },
+      "b0000010-updk-4000-8000-000000000010": {
+        "id": "b0000010-updk-4000-8000-000000000010",
+        "type": "prompt",
+        "name": "UPDATE DECK",
+        "position": { "x": 150, "y": 830 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nYou just completed: {{card_text}}\n\nUpdate the deck's text fields to reflect what was accomplished. Use the minflow CLI:\n\n1. Update `done` — append what was just completed to the existing narrative: `minflow deck update {{deck_id}} --done \"<updated done text>\"`\n2. Update `notes` — refresh with current project state, remove stale info: `minflow deck update {{deck_id}} --notes \"<updated notes>\"`\n\nKeep both fields concise. The `done` field is a running summary of completed milestones. The `notes` field is current context (open questions, blockers, active state).\n\nDo not output any text to the user.",
+        "output_schema": null,
+        "sound_effect": null,
+        "disable_auto_git": true
+      },
+      "b0000008-refr-4000-8000-000000000008": {
+        "id": "b0000008-refr-4000-8000-000000000008",
+        "type": "refresh",
+        "name": "REFRESH",
+        "position": { "x": 150, "y": 950 }
+      },
+      "b0000009-noti-4000-8000-000000000009": {
+        "id": "b0000009-noti-4000-8000-000000000009",
+        "type": "prompt",
+        "name": "NOTIFY USER",
+        "position": { "x": 400, "y": 610 },
+        "prompt": "[Automated flowchart step — output goes to the user.]\n\nThe work on \"{{card_text}}\" requires human review before it can be marked complete.\n\nReason: {{reason}}\n\nSend a clear, concise summary to the user explaining:\n1. What was accomplished\n2. Why human review is needed\n3. What specifically they should review or verify",
+        "output_schema": null,
+        "sound_effect": null,
+        "disable_auto_git": true
+      },
+      "b000000a-exit-4000-8000-00000000000a": {
+        "id": "b000000a-exit-4000-8000-00000000000a",
+        "type": "exit",
+        "name": "AWAIT HUMAN",
+        "position": { "x": 400, "y": 730 },
+        "exit_code": 0
+      },
+      "b000000b-end-4000-8000-00000000000b": {
+        "id": "b000000b-end-4000-8000-00000000000b",
+        "type": "end",
+        "name": "DECK COMPLETE",
+        "position": { "x": 650, "y": 270 }
+      },
+      "b000000c-chkt-4000-8000-00000000000c": {
+        "id": "b000000c-chkt-4000-8000-00000000000c",
+        "type": "prompt",
+        "name": "CHECK MANUAL TEST",
+        "position": { "x": 400, "y": 150 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nReview the work completed during this /mil session. Was any code, configuration, or functionality implemented or changed?\n\nSet needs_test to true if something was implemented that the user should manually verify. Set to false if the session only did planning, research, documentation, or git operations with no functional changes.",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "needs_test": { "type": "boolean" }
+          },
+          "required": ["needs_test"]
+        },
+        "sound_effect": null,
+        "disable_auto_git": true
+      },
+      "b000000d-ntbr-4000-8000-00000000000d": {
+        "id": "b000000d-ntbr-4000-8000-00000000000d",
+        "type": "branch",
+        "name": "NEEDS TEST?",
+        "position": { "x": 400, "y": 270 },
+        "condition": "needs_test"
+      },
+      "b000000e-addt-4000-8000-00000000000e": {
+        "id": "b000000e-addt-4000-8000-00000000000e",
+        "type": "prompt",
+        "name": "ADD TEST CARD",
+        "position": { "x": 400, "y": 370 },
+        "prompt": "[Automated flowchart step — output goes to the user.]\n\nAdd a manual testing card to the deck:\n\nRun `minflow card add {{deck_id}} \"Manually test changes\" --top`\n\nThen list the specific changes that require manual testing. For each change, state:\n- What was changed\n- What the user should do to test it (specific steps)\n- What a successful test looks like\n\nBe brief — use bullet points.",
+        "output_schema": null,
+        "sound_effect": null,
+        "disable_auto_git": true
+      },
+      "b000000f-exit-4000-8000-00000000000f": {
+        "id": "b000000f-exit-4000-8000-00000000000f",
+        "type": "end",
+        "name": "NEEDS TESTING",
+        "position": { "x": 400, "y": 470 }
+      }
+    },
+    "connections": [
+      {
+        "id": "c0000001-0000-4000-8000-000000000001",
+        "source_block_id": "b0000001-start-4000-8000-000000000001",
+        "target_block_id": "b0000002-get-4000-8000-000000000002",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c0000002-0000-4000-8000-000000000002",
+        "source_block_id": "b0000002-get-4000-8000-000000000002",
+        "target_block_id": "b0000003-hasc-4000-8000-000000000003",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c0000003-0000-4000-8000-000000000003",
+        "source_block_id": "b0000003-hasc-4000-8000-000000000003",
+        "target_block_id": "b0000004-exec-4000-8000-000000000004",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c0000004-0000-4000-8000-000000000004",
+        "source_block_id": "b0000003-hasc-4000-8000-000000000003",
+        "target_block_id": "b000000c-chkt-4000-8000-00000000000c",
+        "source_port": "right",
+        "target_port": "left",
+        "is_true_path": false,
+        "condition": null,
+        "label": "no cards left"
+      },
+      {
+        "id": "c000000c-0000-4000-8000-00000000000c",
+        "source_block_id": "b000000c-chkt-4000-8000-00000000000c",
+        "target_block_id": "b000000d-ntbr-4000-8000-00000000000d",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c000000d-0000-4000-8000-00000000000d",
+        "source_block_id": "b000000d-ntbr-4000-8000-00000000000d",
+        "target_block_id": "b000000e-addt-4000-8000-00000000000e",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c000000e-0000-4000-8000-00000000000e",
+        "source_block_id": "b000000d-ntbr-4000-8000-00000000000d",
+        "target_block_id": "b000000b-end-4000-8000-00000000000b",
+        "source_port": "right",
+        "target_port": "left",
+        "is_true_path": false,
+        "condition": null,
+        "label": "no testing needed"
+      },
+      {
+        "id": "c000000f-0000-4000-8000-00000000000f",
+        "source_block_id": "b000000e-addt-4000-8000-00000000000e",
+        "target_block_id": "b000000f-exit-4000-8000-00000000000f",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c0000005-0000-4000-8000-000000000005",
+        "source_block_id": "b0000004-exec-4000-8000-000000000004",
+        "target_block_id": "b0000005-chk-4000-8000-000000000005",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c0000006-0000-4000-8000-000000000006",
+        "source_block_id": "b0000005-chk-4000-8000-000000000005",
+        "target_block_id": "b0000006-appr-4000-8000-000000000006",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c0000007-0000-4000-8000-000000000007",
+        "source_block_id": "b0000006-appr-4000-8000-000000000006",
+        "target_block_id": "b0000007-mark-4000-8000-000000000007",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c0000008-0000-4000-8000-000000000008",
+        "source_block_id": "b0000006-appr-4000-8000-000000000006",
+        "target_block_id": "b0000009-noti-4000-8000-000000000009",
+        "source_port": "right",
+        "target_port": "left",
+        "is_true_path": false,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c0000009-0000-4000-8000-000000000009",
+        "source_block_id": "b0000007-mark-4000-8000-000000000007",
+        "target_block_id": "b0000010-updk-4000-8000-000000000010",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c0000010-0000-4000-8000-000000000010",
+        "source_block_id": "b0000010-updk-4000-8000-000000000010",
+        "target_block_id": "b0000008-refr-4000-8000-000000000008",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c000000a-0000-4000-8000-00000000000a",
+        "source_block_id": "b0000008-refr-4000-8000-000000000008",
+        "target_block_id": "b0000002-get-4000-8000-000000000002",
+        "source_port": "top",
+        "target_port": "left",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c000000b-0000-4000-8000-00000000000b",
+        "source_block_id": "b0000009-noti-4000-8000-000000000009",
+        "target_block_id": "b000000a-exit-4000-8000-00000000000a",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      }
+    ],
+    "start_block_id": "b0000001-start-4000-8000-000000000001"
+  },
+  "metadata": {
+    "created": "2026-03-01T14:49:00.000000",
+    "modified": "2026-03-01T14:49:00.000000",
+    "version": "1.0",
+    "author": null,
+    "tags": ["automation", "deck", "task-loop", "low-approval"]
+  },
+  "arguments": []
+}

@@ -1,0 +1,21 @@
+{
+  "typeCheckingMode": "strict",
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Linux",
+
+  "include": [
+    "axi/"
+  ],
+  "exclude": [
+    "**/test_*.py",
+    ".venv",
+    "**/__pycache__"
+  ],
+
+  "venvPath": ".",
+  "venv": ".venv",
+
+  "reportMissingTypeStubs": "warning",
+  "reportUnusedImport": false,
+  "reportUnusedVariable": false
+}

@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+
+# Environment variables
+.env
+
+# uv
+.python-version
+
+# IDE
+.vscode/
+.idea/
+
+# Rust
+axi-rs/target/
+
+# OS
+.DS_Store
+
+# User data
+profile/
+TODOS.md
+USER_INFO_RAW.md
+schedules.json
+schedule_skips.json
+schedule_history.json
+agent_history.json
+server_log.jsonl
+projects/
+personal/
+
+# Instance-specific instructions (gitignored, loaded into system prompt)
+nova_instructions.md
+test_instructions.md
+
+# Record-handler working directory
+record-handler/
+
+# LLM cache
+.llm_cache/
+
+# Test / runtime artifacts
+.hypothesis/
+.master_session_id
+
+# Runtime signals and state
+.restart_requested
+.rollback_performed
+.crash_analysis
+.crash_log_snapshot
+.active_sessions
+.bot_output.log
+.bridge.log
+.bot.lock
+.merge-queue.json
+.merge-queue.lock
+.merge-exec.lock
+logs/
+config.json

@@ -1,0 +1,36 @@
+# Agent Spawning Reference
+
+IMPORTANT: When the user says "spawn an agent" or "spawn a new agent," they mean an Axi agent session
+(a persistent Claude Code session with its own Discord channel), NOT a background subagent via the Task tool.
+Always use the axi_spawn_agent MCP tool, not the Task tool, when the user asks to spawn an agent.
+
+You can spawn independent Claude Code agent sessions to work on tasks autonomously.
+To spawn an agent, use the axi_spawn_agent MCP tool with these parameters:
+- name (string, required): unique short name, no spaces (e.g. "feature-auth", "fix-bug-123")
+- cwd (string, required): absolute path to the working directory for the agent
+- prompt (string, required): initial task instructions — be specific and detailed since the agent works independently
+- resume (string, optional): session ID from a previously killed agent to resume with full conversation context
+- extensions (list of strings, optional): extension names to load into the agent's system prompt. Defaults to the standard set. Pass [] to disable extensions. Available extensions are in the extensions/ directory.
+
+To kill an agent, use the axi_kill_agent MCP tool with:
+- name (string, required): name of the agent to kill
+
+Both tools return immediate results — no file creation or polling needed.
+
+## Rules
+
+- Session IDs are shown when agents are killed and in /list-agents output.
+  They are also stored in each agent's Discord channel topic.
+- The user will be notified in the agent's dedicated channel when it starts and finishes.
+- Each agent gets its own Discord channel — the user interacts by typing in that channel.
+- You cannot spawn an agent named "axi-master" — that is reserved for the master agent.
+- Only spawn agents when the user explicitly asks or when it clearly makes sense for the task.
+
+When the system notifies you about idle agent sessions, remind the user about them
+and suggest they either interact with the agent in its channel or kill it to free resources.
+
+## Directory Conventions
+
+- The default working directory for spawned agents is the user data directory under `agents/<agent-name>/`.
+- The top-level user data directory is reserved for user-level files (profile, todos, plans, etc.) — agents get their own subdirectories.
+- The axi-assistant source code is in the bot's working directory — when spawning agents to work on it, pass that path as cwd.

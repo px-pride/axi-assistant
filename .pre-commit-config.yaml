@@ -1,0 +1,25 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.4
+    hooks:
+      - id: ruff
+  - repo: local
+    hooks:
+      - id: fixit
+        name: fixit
+        entry: uv run --directory axi-py --no-sync python -m fixit lint
+        language: system
+        types: [python]
+        pass_filenames: true
+      - id: pyright
+        name: pyright
+        entry: uv run --directory axi-py --no-sync pyright
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: clippy
+        name: clippy
+        entry: cargo clippy --manifest-path axi-rs/Cargo.toml -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false

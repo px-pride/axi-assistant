@@ -1,0 +1,161 @@
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "name": "soul-flow",
+  "description": "Wraps flowchart commands with the task lifecycle (pre/post hooks, completion check, record reporting, status check).",
+  "flowchart": {
+    "blocks": {
+      "start-001": {
+        "id": "start-001",
+        "type": "start",
+        "name": "START",
+        "position": { "x": 300, "y": 50 }
+      },
+      "branch-pre": {
+        "id": "branch-pre",
+        "type": "branch",
+        "name": "HAS_PRE_TASK?",
+        "position": { "x": 300, "y": 150 },
+        "condition": "pre_task"
+      },
+      "cmd-pre": {
+        "id": "cmd-pre",
+        "type": "command",
+        "name": "RUN_PRE_TASK",
+        "position": { "x": 300, "y": 250 },
+        "command_name": "$1",
+        "arguments": "$5",
+        "inherit_variables": false,
+        "merge_output": true
+      },
+      "cmd-wrapped": {
+        "id": "cmd-wrapped",
+        "type": "command",
+        "name": "RUN_WRAPPED",
+        "position": { "x": 300, "y": 350 },
+        "command_name": "$4",
+        "arguments": "$5",
+        "inherit_variables": false,
+        "merge_output": true
+      },
+      "prompt-test": {
+        "id": "prompt-test",
+        "type": "prompt",
+        "name": "TEST_COMPLETION",
+        "position": { "x": 300, "y": 450 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nDoes the work just completed require manual testing you cannot perform yourself?\n\nProvide your final answer in this output JSON schema:",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "manualTestingNeeded": { "type": "boolean" }
+          },
+          "required": ["manualTestingNeeded"]
+        },
+        "sound_effect": null
+      },
+      "branch-manual": {
+        "id": "branch-manual",
+        "type": "branch",
+        "name": "NEEDS_MANUAL?",
+        "position": { "x": 300, "y": 550 },
+        "condition": "manualTestingNeeded"
+      },
+      "prompt-wait": {
+        "id": "prompt-wait",
+        "type": "prompt",
+        "name": "WAIT_FOR_USER",
+        "position": { "x": 300, "y": 650 },
+        "prompt": "[Automated flowchart step — output goes to the user.]\n\nList the specific changes you just made that require manual testing. For each change, state:\n- What was changed\n- What the user should do to test it (specific steps)\n- What a successful test looks like\n\nBe brief — use bullet points.",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "prompt-records": {
+        "id": "prompt-records",
+        "type": "prompt",
+        "name": "REPORT_RECORDS",
+        "position": { "x": 300, "y": 750 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nReport what was accomplished for this task and update the relevant records: $5\n\n$3\n\nDo not output any text to the user.",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "branch-post": {
+        "id": "branch-post",
+        "type": "branch",
+        "name": "HAS_POST_TASK?",
+        "position": { "x": 300, "y": 850 },
+        "condition": "post_task"
+      },
+      "cmd-post": {
+        "id": "cmd-post",
+        "type": "command",
+        "name": "RUN_POST_TASK",
+        "position": { "x": 300, "y": 950 },
+        "command_name": "$2",
+        "arguments": "$5",
+        "inherit_variables": false,
+        "merge_output": true
+      },
+      "prompt-gather-action": {
+        "id": "prompt-gather-action",
+        "type": "prompt",
+        "name": "GATHER_NEXT_ACTION",
+        "position": { "x": 300, "y": 1050 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nDetermine the USER's next action — not yours, the human user's. Ground this in your project status records: check for the next-in-line incomplete task.\n\nIf there is a next-in-line task, that IS the user's next action — state it directly. Do not offer alternatives or list other tasks. Do not ask the user to decide.\n\nDo not output any text.\n\nProvide your final answer in this output JSON schema:",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "nextAction": { "type": "string" }
+          },
+          "required": ["nextAction"]
+        },
+        "sound_effect": null
+      },
+      "prompt-set-status": {
+        "id": "prompt-set-status",
+        "type": "prompt",
+        "name": "SET_STATUS",
+        "position": { "x": 300, "y": 1150 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nBased on the next action you determined, pick the emoji that best represents the **type of to-do** the user has, and call set_channel_status. Do not output any text.\n\nCommon to-do types:\n- 📚 User should read a long response or review a document you produced\n- 🔬 User needs to test something manually that you can't verify yourself\n- 💬 User needs to respond — you asked a question, need approval, or are waiting for direction\n\n**Custom emoji** — if none of the above fit, pick any single emoji that captures the user's to-do type (e.g. 📍 for location scouting, 💰 for budgeting, ✍️ for writing). Use your judgment. Being specific is better than being generic.\n\n**Never use ✅ (checkmark)** — a checkmark is meaningless as a user to-do. It tells the user nothing about what they need to do next.\n\n- ❓ **Last resort only** — you genuinely have no idea what the user wants next and cannot infer it from context, pending tasks, or conversation history. Exhaust other options first.\n\n**Never set ⏳ yourself** — hourglass is applied automatically when you start processing. Setting it manually will conflict with the auto-hourglass system.",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "end-001": {
+        "id": "end-001",
+        "type": "end",
+        "name": "END",
+        "position": { "x": 300, "y": 1250 }
+      }
+    },
+    "connections": [
+      { "id": "c01", "source_block_id": "start-001", "target_block_id": "branch-pre", "source_port": "bottom", "target_port": "top", "is_true_path": true, "condition": null, "label": null },
+      { "id": "c02", "source_block_id": "branch-pre", "target_block_id": "cmd-pre", "source_port": "bottom", "target_port": "top", "is_true_path": true, "condition": null, "label": "has pre_task hook" },
+      { "id": "c03", "source_block_id": "branch-pre", "target_block_id": "cmd-wrapped", "source_port": "right", "target_port": "right", "is_true_path": false, "condition": null, "label": "no pre_task hook" },
+      { "id": "c04", "source_block_id": "cmd-pre", "target_block_id": "cmd-wrapped", "source_port": "bottom", "target_port": "top", "is_true_path": true, "condition": null, "label": null },
+      { "id": "c05", "source_block_id": "cmd-wrapped", "target_block_id": "prompt-test", "source_port": "bottom", "target_port": "top", "is_true_path": true, "condition": null, "label": null },
+      { "id": "c06", "source_block_id": "prompt-test", "target_block_id": "branch-manual", "source_port": "bottom", "target_port": "top", "is_true_path": true, "condition": null, "label": null },
+      { "id": "c07", "source_block_id": "branch-manual", "target_block_id": "prompt-wait", "source_port": "bottom", "target_port": "top", "is_true_path": true, "condition": null, "label": "needs manual testing" },
+      { "id": "c08", "source_block_id": "branch-manual", "target_block_id": "prompt-records", "source_port": "right", "target_port": "right", "is_true_path": false, "condition": null, "label": "no manual testing needed" },
+      { "id": "c09", "source_block_id": "prompt-wait", "target_block_id": "prompt-records", "source_port": "bottom", "target_port": "top", "is_true_path": true, "condition": null, "label": null },
+      { "id": "c10", "source_block_id": "prompt-records", "target_block_id": "branch-post", "source_port": "bottom", "target_port": "top", "is_true_path": true, "condition": null, "label": null },
+      { "id": "c11", "source_block_id": "branch-post", "target_block_id": "cmd-post", "source_port": "bottom", "target_port": "top", "is_true_path": true, "condition": null, "label": "has post_task hook" },
+      { "id": "c12", "source_block_id": "branch-post", "target_block_id": "prompt-gather-action", "source_port": "right", "target_port": "right", "is_true_path": false, "condition": null, "label": "no post_task hook" },
+      { "id": "c13", "source_block_id": "cmd-post", "target_block_id": "prompt-gather-action", "source_port": "bottom", "target_port": "top", "is_true_path": true, "condition": null, "label": null },
+      { "id": "c14", "source_block_id": "prompt-gather-action", "target_block_id": "prompt-set-status", "source_port": "bottom", "target_port": "top", "is_true_path": true, "condition": null, "label": null },
+      { "id": "c15", "source_block_id": "prompt-set-status", "target_block_id": "end-001", "source_port": "bottom", "target_port": "top", "is_true_path": true, "condition": null, "label": null }
+    ],
+    "start_block_id": "start-001"
+  },
+  "metadata": {
+    "created": "2026-03-03T00:00:00.000000",
+    "modified": "2026-03-03T00:00:00.000000",
+    "version": "1.0",
+    "author": null,
+    "tags": ["soul", "flowchart-wrapper", "task-lifecycle"]
+  },
+  "arguments": [
+    { "name": "pre_task", "description": "Pre-task hook command name", "required": false, "default": "" },
+    { "name": "post_task", "description": "Post-task hook command name", "required": false, "default": "" },
+    { "name": "report_records_text", "description": "In-prompt hook text for record reporting", "required": false, "default": "" },
+    { "name": "wrapped_command", "description": "Name of the flowchart command to execute", "required": true },
+    { "name": "wrapped_args", "description": "Arguments string for the wrapped command", "required": false, "default": "" }
+  ]
+}

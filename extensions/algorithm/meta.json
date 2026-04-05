@@ -1,0 +1,6 @@
+{
+  "audience": "all",
+  "hooks": {
+    "execute": "algorithm"
+  }
+}

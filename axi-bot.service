@@ -1,0 +1,21 @@
+[Unit]
+Description=Axi Personal Assistant Discord Bot
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pride/coding-projects/personal-assistant/axi-py
+ExecStart=/home/pride/.local/bin/uv run python -m axi.supervisor
+Restart=always
+RestartPreventExitStatus=0 SIGTERM
+SuccessExitStatus=42
+RestartSec=5
+TimeoutStopSec=15
+Environment="HOME=/home/pride"
+Environment="PATH=/home/pride/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+[Install]
+WantedBy=default.target

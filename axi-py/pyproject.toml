@@ -1,0 +1,107 @@
+[project]
+name = "personal-assistant"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "discord.py",
+    "claude-agent-sdk",
+    "python-dotenv",
+    "croniter",
+    "httpx",
+    "tzdata>=2025.3",
+    "arrow",
+    "flowcoder-engine",
+    "flowcoder-flowchart",
+    "flowcoder-tui",
+    "procmux",
+    "claudewire",
+    "discordquery",
+    "agenthub",
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+]
+
+[tool.uv.sources]
+flowcoder-engine = { path = "packages/flowcoder_engine", editable = true }
+flowcoder-flowchart = { path = "packages/flowcoder_flowchart", editable = true }
+flowcoder-tui = { path = "packages/flowcoder_tui", editable = true }
+procmux = { path = "packages/procmux", editable = true }
+claudewire = { path = "packages/claudewire", editable = true }
+discordquery = { path = "packages/discordquery", editable = true }
+agenthub = { path = "packages/agenthub", editable = true }
+
+[dependency-groups]
+dev = [
+    "fixit>=2.2.1",
+    "hypothesis>=6.151.9",
+    "libcst>=1.8.6",
+    "pre-commit>=4.5.1",
+    "pyright>=1.1.408",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.15.4",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "F",     # Pyflakes — unused imports, undefined names, etc.
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "I",     # isort — import sorting
+    "UP",    # pyupgrade — modernize syntax for Python 3.12+
+    "B",     # flake8-bugbear — common bug patterns
+    "SIM",   # flake8-simplify — simplifiable code
+    "TCH",   # flake8-type-checking — move type-only imports behind TYPE_CHECKING
+    "RUF",   # Ruff-specific rules
+    "A",     # flake8-builtins — shadowing built-in names (list, id, type, etc.)
+    "C4",    # flake8-comprehensions — unnecessary list()/dict() wrappers
+    "DTZ",   # flake8-datetimez — naive datetime calls without tz
+    "PIE",   # flake8-pie — misc best practices (unnecessary pass, dict.setdefault, etc.)
+    "T20",   # flake8-print — leftover print() statements
+    "PT",    # flake8-pytest-style — pytest best practices
+    "RET",   # flake8-return — unnecessary else after return, etc.
+    "FURB",  # refurb — modernization suggestions (Python 3.12+ idioms)
+    "PERF",  # perflint — performance anti-patterns
+]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "E701",   # multiple statements on one line — used for compact try/except
+    "E402",   # module-level import not at top — intentional late imports for organization
+    "SIM105", # contextlib.suppress — explicit try/except/pass is clearer in this codebase
+    "SIM108", # ternary operator — readability preference
+    "SIM115", # open-file-with-context-handler — not always practical (e.g. locks, long-lived files)
+    "B010",   # do not call setattr with a constant attribute value
+    "RUF006", # asyncio-dangling-task — fire-and-forget tasks are intentional in this bot
+    "RUF059", # unused-unpacked-variable — common in destructuring patterns
+    "SIM102", # collapsible-if — nested ifs often clearer than combined conditions
+    "RET505", # unnecessary else after return — explicit else is often clearer
+    "RET506", # unnecessary elif after raise — same rationale
+]
+
+[tool.ruff.lint.per-file-ignores]
+"test_*.py" = ["F841", "T20", "PT012"]  # test files: unused vars, print, complex pytest.raises
+"packages/discordquery/discordquery/__main__.py" = ["T20"]  # CLI entry point
+"packages/discordquery/discordquery/query.py" = ["T20"]  # CLI tool
+"packages/discordquery/discordquery/wait.py" = ["T20"]   # CLI tool
+"packages/procmux/procmux/server.py" = ["T20"]  # CLI entrypoint
+"packages/flowcoder_engine/examples/*.py" = ["T20"]  # dev scripts
+"packages/flowcoder_tui/flowcoder_tui/repl.py" = ["T20"]  # TUI prints to terminal
+"lint/rules.py" = ["RUF012"]  # VALID/INVALID class attrs are Fixit's API pattern
+
+[tool.ruff.lint.isort]
+known-first-party = ["axi", "discordquery", "procmux", "claudewire", "agenthub"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.fixit]
+enable = [".lint"]
+disable = ["fixit.rules"]

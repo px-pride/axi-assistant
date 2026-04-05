@@ -1,0 +1,559 @@
+{
+  "id": "53b0c4b6-f7f1-4f81-a3f5-6f475633d3bc",
+  "name": "soul",
+  "description": "Core message-handling procedure for Axi. Classifies incoming messages as tasks or conversation, runs hook commands, and manages the full task lifecycle.",
+  "flowchart": {
+    "blocks": {
+      "fb770137-ab01-4880-8f9c-ac85fe93b800": {
+        "id": "fb770137-ab01-4880-8f9c-ac85fe93b800",
+        "type": "start",
+        "name": "START",
+        "position": { "x": 300, "y": 50 }
+      },
+      "f254fe46-5b53-4a9f-808a-169da351c00d": {
+        "id": "f254fe46-5b53-4a9f-808a-169da351c00d",
+        "type": "prompt",
+        "name": "CLASSIFY",
+        "position": { "x": 300, "y": 450 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nYou received this message from the user:\n$5\n\n1. Is this a task requiring you to take action (create, change, investigate, implement something), or conversation/question you can answer directly?\n2. Does the message relate to any of these topics: scheduling, agent spawning, or discord message queries?\n   If yes, list the absolute file paths of ALL relevant reference docs (comma-separated). If no, return an empty string for refFiles.\n   - Scheduling: /home/pride/coding-projects/personal-assistant/prompts/refs/scheduling.md\n   - Agent spawning: /home/pride/coding-projects/personal-assistant/prompts/refs/agent-spawning.md\n   - Discord message queries: /home/pride/coding-projects/personal-assistant/prompts/refs/discord-query.md",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "isTask": { "type": "boolean" },
+            "hasRefTopics": { "type": "boolean" },
+            "refFiles": { "type": "string" }
+          },
+          "required": ["isTask", "hasRefTopics", "refFiles"]
+        },
+        "sound_effect": null
+      },
+      "5599ae45-0a3c-4da1-b4e0-741a976ceef8": {
+        "id": "5599ae45-0a3c-4da1-b4e0-741a976ceef8",
+        "type": "branch",
+        "name": "HAS_REF_TOPICS?",
+        "position": { "x": 300, "y": 550 },
+        "condition": "hasRefTopics"
+      },
+      "8cc18feb-16b9-4b46-835b-b4b673ed9fbf": {
+        "id": "8cc18feb-16b9-4b46-835b-b4b673ed9fbf",
+        "type": "prompt",
+        "name": "READ_REFS",
+        "position": { "x": 300, "y": 650 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nRead the reference docs you identified above. Do not read docs you did not identify as relevant. Do not output any text.",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "919fad3e-8ede-43e7-bd83-50ad052a462f": {
+        "id": "919fad3e-8ede-43e7-bd83-50ad052a462f",
+        "type": "branch",
+        "name": "IS_TASK?",
+        "position": { "x": 300, "y": 750 },
+        "condition": "isTask"
+      },
+      "0d58740d-be83-45ab-b05d-4f6da4f87b50": {
+        "id": "0d58740d-be83-45ab-b05d-4f6da4f87b50",
+        "type": "prompt",
+        "name": "RESPOND",
+        "position": { "x": 600, "y": 750 },
+        "prompt": "[Automated flowchart step — output goes to the user.]\n\nThe user's message was classified as conversation (not a task). Respond directly:\n\n$5",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "7c5beb11-d93f-446f-aa66-5624b04ec4b7": {
+        "id": "7c5beb11-d93f-446f-aa66-5624b04ec4b7",
+        "type": "branch",
+        "name": "HAS_POST_RESPOND?",
+        "position": { "x": 600, "y": 850 },
+        "condition": "post_respond"
+      },
+      "df9c142f-e1f3-4f65-a38d-4ff165fdca51": {
+        "id": "df9c142f-e1f3-4f65-a38d-4ff165fdca51",
+        "type": "command",
+        "name": "RUN_POST_RESPOND",
+        "position": { "x": 600, "y": 950 },
+        "command_name": "$4",
+        "arguments": "$5",
+        "inherit_variables": false,
+        "merge_output": true
+      },
+      "43d3f6c7-bba8-4b04-8ca9-afe5b7bdeead": {
+        "id": "43d3f6c7-bba8-4b04-8ca9-afe5b7bdeead",
+        "type": "prompt",
+        "name": "GATHER_NEXT_ACTION_A",
+        "position": { "x": 600, "y": 1050 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nDetermine the USER's next action — not yours, the human user's. Ground this in your project status records: check for the next-in-line incomplete task.\n\nIf there is a next-in-line task, that IS the user's next action — state it directly. Do not offer alternatives or list other tasks. Do not ask the user to decide.\n\nDo not output any text.",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "nextAction": { "type": "string" }
+          },
+          "required": ["nextAction"]
+        },
+        "sound_effect": null
+      },
+      "set-status-a": {
+        "id": "set-status-a",
+        "type": "prompt",
+        "name": "SET_STATUS_A",
+        "position": { "x": 600, "y": 1150 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nBased on the next action you determined, pick the emoji that best represents the **type of to-do** the user has, and call set_channel_status. Do not output any text.\n\nCommon to-do types:\n- 📚 User should read a long response or review a document you produced\n- 🔬 User needs to test something manually that you can't verify yourself\n- 💬 User needs to respond — you asked a question, need approval, or are waiting for direction\n\n**Custom emoji** — if none of the above fit, pick any single emoji that captures the user's to-do type (e.g. 📍 for location scouting, 💰 for budgeting, ✍️ for writing). Use your judgment. Being specific is better than being generic.\n\n**Never use ✅ (checkmark)** — a checkmark is meaningless as a user to-do. It tells the user nothing about what they need to do next.\n\n- ❓ **Last resort only** — you genuinely have no idea what the user wants next and cannot infer it from context, pending tasks, or conversation history. Exhaust other options first.\n\n**Never set ⏳ yourself** — hourglass is applied automatically when you start processing. Setting it manually will conflict with the auto-hourglass system.",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "86ba2b4c-46fd-4efa-bd4f-79ba420d7f6f": {
+        "id": "86ba2b4c-46fd-4efa-bd4f-79ba420d7f6f",
+        "type": "end",
+        "name": "END_A",
+        "position": { "x": 600, "y": 1250 }
+      },
+      "82e4da96-18f0-4527-b90e-8de774583257": {
+        "id": "82e4da96-18f0-4527-b90e-8de774583257",
+        "type": "branch",
+        "name": "HAS_PRE_TASK?",
+        "position": { "x": 300, "y": 950 },
+        "condition": "pre_task"
+      },
+      "ccafb3a6-e00b-441c-bd02-b227681184eb": {
+        "id": "ccafb3a6-e00b-441c-bd02-b227681184eb",
+        "type": "command",
+        "name": "RUN_PRE_TASK",
+        "position": { "x": 300, "y": 1050 },
+        "command_name": "$1",
+        "arguments": "$5",
+        "inherit_variables": false,
+        "merge_output": true
+      },
+      "e94ec282-afee-4025-b87e-25c5a170f828": {
+        "id": "e94ec282-afee-4025-b87e-25c5a170f828",
+        "type": "branch",
+        "name": "HAS_EXECUTE?",
+        "position": { "x": 300, "y": 1150 },
+        "condition": "execute"
+      },
+      "4eefaf88-8136-4314-85ee-efa056247418": {
+        "id": "4eefaf88-8136-4314-85ee-efa056247418",
+        "type": "command",
+        "name": "RUN_EXECUTE",
+        "position": { "x": 300, "y": 1250 },
+        "command_name": "$2",
+        "arguments": "$5",
+        "inherit_variables": false,
+        "merge_output": true
+      },
+      "8df8f16e-e261-4301-ac9c-2e708debd357": {
+        "id": "8df8f16e-e261-4301-ac9c-2e708debd357",
+        "type": "prompt",
+        "name": "BARE_DO_IT",
+        "position": { "x": 550, "y": 1250 },
+        "prompt": "[Automated flowchart step — output goes to the user.]\n\nThe user's message was classified as a task. Execute it:\n\n$5",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "0d8764e2-abc8-4412-bd7a-8ba2849e681a": {
+        "id": "0d8764e2-abc8-4412-bd7a-8ba2849e681a",
+        "type": "prompt",
+        "name": "TEST_COMPLETION",
+        "position": { "x": 300, "y": 1350 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nDoes the work just completed require manual testing you cannot perform yourself?",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "manualTestingNeeded": { "type": "boolean" }
+          },
+          "required": ["manualTestingNeeded"]
+        },
+        "sound_effect": null
+      },
+      "0e7d4411-710b-4d80-bbde-7f28fb9f210a": {
+        "id": "0e7d4411-710b-4d80-bbde-7f28fb9f210a",
+        "type": "branch",
+        "name": "NEEDS_MANUAL?",
+        "position": { "x": 300, "y": 1450 },
+        "condition": "manualTestingNeeded"
+      },
+      "46a7d8fa-7256-468c-aa32-270686eb7a38": {
+        "id": "46a7d8fa-7256-468c-aa32-270686eb7a38",
+        "type": "prompt",
+        "name": "WAIT_FOR_USER",
+        "position": { "x": 300, "y": 1550 },
+        "prompt": "[Automated flowchart step — output goes to the user.]\n\nList the specific changes you just made that require manual testing. For each change, state:\n- What was changed\n- What the user should do to test it (specific steps)\n- What a successful test looks like\n\nBe brief — use bullet points.",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "655beb32-083b-42cc-80c2-865fffcc13ca": {
+        "id": "655beb32-083b-42cc-80c2-865fffcc13ca",
+        "type": "prompt",
+        "name": "REPORT_RECORDS",
+        "position": { "x": 300, "y": 1650 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nReport what was accomplished for this task and update the relevant records: $5\n\n$6\n\nDo not output any text to the user.",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "975cd3b2-0541-49e9-b23a-c12a1fcdaddb": {
+        "id": "975cd3b2-0541-49e9-b23a-c12a1fcdaddb",
+        "type": "branch",
+        "name": "HAS_POST_TASK?",
+        "position": { "x": 300, "y": 1750 },
+        "condition": "post_task"
+      },
+      "f06fc6f3-f89c-42f4-b784-45fb8de89603": {
+        "id": "f06fc6f3-f89c-42f4-b784-45fb8de89603",
+        "type": "command",
+        "name": "RUN_POST_TASK",
+        "position": { "x": 300, "y": 1850 },
+        "command_name": "$3",
+        "arguments": "$5",
+        "inherit_variables": false,
+        "merge_output": true
+      },
+      "dfba203a-8cdb-4f45-be8d-6c6fed95eb41": {
+        "id": "dfba203a-8cdb-4f45-be8d-6c6fed95eb41",
+        "type": "prompt",
+        "name": "GATHER_NEXT_ACTION_B",
+        "position": { "x": 300, "y": 1950 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nDetermine the USER's next action — not yours, the human user's. Ground this in your project status records: check for the next-in-line incomplete task.\n\nIf there is a next-in-line task, that IS the user's next action — state it directly. Do not offer alternatives or list other tasks. Do not ask the user to decide.\n\nDo not output any text.",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "nextAction": { "type": "string" }
+          },
+          "required": ["nextAction"]
+        },
+        "sound_effect": null
+      },
+      "set-status-b": {
+        "id": "set-status-b",
+        "type": "prompt",
+        "name": "SET_STATUS_B",
+        "position": { "x": 300, "y": 2050 },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nBased on the next action you determined, pick the emoji that best represents the **type of to-do** the user has, and call set_channel_status. Do not output any text.\n\nCommon to-do types:\n- 📚 User should read a long response or review a document you produced\n- 🔬 User needs to test something manually that you can't verify yourself\n- 💬 User needs to respond — you asked a question, need approval, or are waiting for direction\n\n**Custom emoji** — if none of the above fit, pick any single emoji that captures the user's to-do type (e.g. 📍 for location scouting, 💰 for budgeting, ✍️ for writing). Use your judgment. Being specific is better than being generic.\n\n**Never use ✅ (checkmark)** — a checkmark is meaningless as a user to-do. It tells the user nothing about what they need to do next.\n\n- ❓ **Last resort only** — you genuinely have no idea what the user wants next and cannot infer it from context, pending tasks, or conversation history. Exhaust other options first.\n\n**Never set ⏳ yourself** — hourglass is applied automatically when you start processing. Setting it manually will conflict with the auto-hourglass system.",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "8412b54c-cdef-401a-81c2-b3a7b850b1d0": {
+        "id": "8412b54c-cdef-401a-81c2-b3a7b850b1d0",
+        "type": "end",
+        "name": "END_B",
+        "position": { "x": 300, "y": 2150 }
+      }
+    },
+    "connections": [
+      {
+        "id": "011e2574-a866-48ec-98ce-2f5c26e3ffee",
+        "source_block_id": "fb770137-ab01-4880-8f9c-ac85fe93b800",
+        "target_block_id": "f254fe46-5b53-4a9f-808a-169da351c00d",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "96e11fa4-548c-4ac4-9604-023da37e0657",
+        "source_block_id": "f254fe46-5b53-4a9f-808a-169da351c00d",
+        "target_block_id": "5599ae45-0a3c-4da1-b4e0-741a976ceef8",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "a907ab50-d63b-4ab6-80b6-ff12f2d999d9",
+        "source_block_id": "5599ae45-0a3c-4da1-b4e0-741a976ceef8",
+        "target_block_id": "8cc18feb-16b9-4b46-835b-b4b673ed9fbf",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": "has ref topics"
+      },
+      {
+        "id": "c2a77456-7332-46f6-800d-0f64003395e5",
+        "source_block_id": "5599ae45-0a3c-4da1-b4e0-741a976ceef8",
+        "target_block_id": "919fad3e-8ede-43e7-bd83-50ad052a462f",
+        "source_port": "right",
+        "target_port": "right",
+        "is_true_path": false,
+        "condition": null,
+        "label": "no ref topics"
+      },
+      {
+        "id": "38994563-70ce-4a56-b746-a25a7f0d2e1f",
+        "source_block_id": "8cc18feb-16b9-4b46-835b-b4b673ed9fbf",
+        "target_block_id": "919fad3e-8ede-43e7-bd83-50ad052a462f",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "8a66f25d-aefe-4810-86d6-1cb50368ddd4",
+        "source_block_id": "919fad3e-8ede-43e7-bd83-50ad052a462f",
+        "target_block_id": "0d58740d-be83-45ab-b05d-4f6da4f87b50",
+        "source_port": "right",
+        "target_port": "left",
+        "is_true_path": false,
+        "condition": null,
+        "label": "not a task"
+      },
+      {
+        "id": "7ca57f5a-318f-491b-9fc6-1e0500db3f99",
+        "source_block_id": "0d58740d-be83-45ab-b05d-4f6da4f87b50",
+        "target_block_id": "7c5beb11-d93f-446f-aa66-5624b04ec4b7",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "2de12ff7-9b1f-485b-84ac-5bebcbda62a6",
+        "source_block_id": "7c5beb11-d93f-446f-aa66-5624b04ec4b7",
+        "target_block_id": "df9c142f-e1f3-4f65-a38d-4ff165fdca51",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": "has post_respond hook"
+      },
+      {
+        "id": "6c27aef4-0fb4-444c-af36-c75ccc3de69c",
+        "source_block_id": "7c5beb11-d93f-446f-aa66-5624b04ec4b7",
+        "target_block_id": "43d3f6c7-bba8-4b04-8ca9-afe5b7bdeead",
+        "source_port": "right",
+        "target_port": "right",
+        "is_true_path": false,
+        "condition": null,
+        "label": "no post_respond hook"
+      },
+      {
+        "id": "fb28c40b-10a3-406c-bfad-53128477798e",
+        "source_block_id": "df9c142f-e1f3-4f65-a38d-4ff165fdca51",
+        "target_block_id": "43d3f6c7-bba8-4b04-8ca9-afe5b7bdeead",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "b871096e-68e6-404d-b824-2d7b7ef45067",
+        "source_block_id": "43d3f6c7-bba8-4b04-8ca9-afe5b7bdeead",
+        "target_block_id": "set-status-a",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "conn-set-status-a-to-end-a",
+        "source_block_id": "set-status-a",
+        "target_block_id": "86ba2b4c-46fd-4efa-bd4f-79ba420d7f6f",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "a3b64af6-e1a7-4204-8df2-3146c5d06b7a",
+        "source_block_id": "919fad3e-8ede-43e7-bd83-50ad052a462f",
+        "target_block_id": "82e4da96-18f0-4527-b90e-8de774583257",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": "is a task"
+      },
+      {
+        "id": "ea729ab1-3320-477b-aa83-ba33d0a3538d",
+        "source_block_id": "82e4da96-18f0-4527-b90e-8de774583257",
+        "target_block_id": "ccafb3a6-e00b-441c-bd02-b227681184eb",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": "has pre_task hook"
+      },
+      {
+        "id": "0e3ba03b-fa20-4be2-bb9f-f01f7eec6f58",
+        "source_block_id": "82e4da96-18f0-4527-b90e-8de774583257",
+        "target_block_id": "e94ec282-afee-4025-b87e-25c5a170f828",
+        "source_port": "right",
+        "target_port": "right",
+        "is_true_path": false,
+        "condition": null,
+        "label": "no pre_task hook"
+      },
+      {
+        "id": "e9abfd2e-cf51-431d-becd-2bd73ce4c06b",
+        "source_block_id": "ccafb3a6-e00b-441c-bd02-b227681184eb",
+        "target_block_id": "e94ec282-afee-4025-b87e-25c5a170f828",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "47de66a8-2fa7-4ab7-8f43-9d2039ef74ad",
+        "source_block_id": "e94ec282-afee-4025-b87e-25c5a170f828",
+        "target_block_id": "4eefaf88-8136-4314-85ee-efa056247418",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": "has execute hook"
+      },
+      {
+        "id": "7475aa24-9288-4bce-879d-b208622e1fad",
+        "source_block_id": "e94ec282-afee-4025-b87e-25c5a170f828",
+        "target_block_id": "8df8f16e-e261-4301-ac9c-2e708debd357",
+        "source_port": "right",
+        "target_port": "left",
+        "is_true_path": false,
+        "condition": null,
+        "label": "no execute hook"
+      },
+      {
+        "id": "1676b3e8-69e1-4656-8d1f-87619fae1054",
+        "source_block_id": "4eefaf88-8136-4314-85ee-efa056247418",
+        "target_block_id": "0d8764e2-abc8-4412-bd7a-8ba2849e681a",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "579f46d7-0281-4a11-9fa0-a2add8ade8ba",
+        "source_block_id": "8df8f16e-e261-4301-ac9c-2e708debd357",
+        "target_block_id": "0d8764e2-abc8-4412-bd7a-8ba2849e681a",
+        "source_port": "bottom",
+        "target_port": "right",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "5b6a0614-159b-431e-a081-136c1ddbd22b",
+        "source_block_id": "0d8764e2-abc8-4412-bd7a-8ba2849e681a",
+        "target_block_id": "0e7d4411-710b-4d80-bbde-7f28fb9f210a",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "ea93a592-44ca-4df8-a559-1ccf4a10b8c9",
+        "source_block_id": "0e7d4411-710b-4d80-bbde-7f28fb9f210a",
+        "target_block_id": "46a7d8fa-7256-468c-aa32-270686eb7a38",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": "needs manual testing"
+      },
+      {
+        "id": "baee2316-e0d0-472a-8e18-0cd4bc50d4b4",
+        "source_block_id": "0e7d4411-710b-4d80-bbde-7f28fb9f210a",
+        "target_block_id": "655beb32-083b-42cc-80c2-865fffcc13ca",
+        "source_port": "right",
+        "target_port": "right",
+        "is_true_path": false,
+        "condition": null,
+        "label": "no manual testing needed"
+      },
+      {
+        "id": "51d7380e-b82b-4901-b2d3-efab7f5cdca0",
+        "source_block_id": "46a7d8fa-7256-468c-aa32-270686eb7a38",
+        "target_block_id": "655beb32-083b-42cc-80c2-865fffcc13ca",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "882f0830-b204-4e97-9fcc-c93e6e9b03b0",
+        "source_block_id": "655beb32-083b-42cc-80c2-865fffcc13ca",
+        "target_block_id": "975cd3b2-0541-49e9-b23a-c12a1fcdaddb",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "7278ab0b-5e0b-4509-9214-eb4914b4254d",
+        "source_block_id": "975cd3b2-0541-49e9-b23a-c12a1fcdaddb",
+        "target_block_id": "f06fc6f3-f89c-42f4-b784-45fb8de89603",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": "has post_task hook"
+      },
+      {
+        "id": "eac6adf4-9c7b-4a41-bb8d-9b94c1ee6200",
+        "source_block_id": "975cd3b2-0541-49e9-b23a-c12a1fcdaddb",
+        "target_block_id": "dfba203a-8cdb-4f45-be8d-6c6fed95eb41",
+        "source_port": "right",
+        "target_port": "right",
+        "is_true_path": false,
+        "condition": null,
+        "label": "no post_task hook"
+      },
+      {
+        "id": "8598afac-6ea7-4eb5-bf35-d1c967ae1ccc",
+        "source_block_id": "f06fc6f3-f89c-42f4-b784-45fb8de89603",
+        "target_block_id": "dfba203a-8cdb-4f45-be8d-6c6fed95eb41",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "e6572fc9-cc5a-491b-a451-9638ac57f3d3",
+        "source_block_id": "dfba203a-8cdb-4f45-be8d-6c6fed95eb41",
+        "target_block_id": "set-status-b",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "conn-set-status-b-to-end-b",
+        "source_block_id": "set-status-b",
+        "target_block_id": "8412b54c-cdef-401a-81c2-b3a7b850b1d0",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      }
+    ],
+    "start_block_id": "fb770137-ab01-4880-8f9c-ac85fe93b800"
+  },
+  "metadata": {
+    "created": "2026-03-02T00:00:00.000000",
+    "modified": "2026-03-02T00:00:00.000000",
+    "version": "1.0",
+    "author": null,
+    "tags": ["soul", "message-handler", "core"]
+  },
+  "arguments": [
+    { "name": "pre_task", "description": "Pre-task hook command name", "required": false, "default": "" },
+    { "name": "execute", "description": "Execute hook command name", "required": false, "default": "" },
+    { "name": "post_task", "description": "Post-task hook command name", "required": false, "default": "" },
+    { "name": "post_respond", "description": "Post-respond hook command name", "required": false, "default": "" },
+    { "name": "message", "description": "User's message to process", "required": true },
+    { "name": "report_records_text", "description": "In-prompt hook text for record reporting", "required": false, "default": "" }
+  ]
+}

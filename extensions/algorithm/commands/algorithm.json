@@ -1,0 +1,407 @@
+{
+  "id": "eefe83ba-c073-4631-aa38-8181a96f6fcc",
+  "name": "algorithm",
+  "description": "Task execution methodology — assesses effort, defines success criteria, builds, verifies, and loops until done.",
+  "flowchart": {
+    "blocks": {
+      "e3f86787-2866-400b-93f5-066d652286fa": {
+        "id": "e3f86787-2866-400b-93f5-066d652286fa",
+        "type": "start",
+        "name": "START",
+        "position": {
+          "x": 300,
+          "y": 50
+        }
+      },
+      "c4035521-eea1-482c-b901-965f925aa93d": {
+        "id": "c4035521-eea1-482c-b901-965f925aa93d",
+        "type": "prompt",
+        "name": "EFFORT_ASSESS",
+        "position": {
+          "x": 300,
+          "y": 150
+        },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nAssess the effort required for this task:\n$1\n\nCategories:\n- quick: under 1 minute — lookups, small edits, simple questions\n- standard: 1-5 minutes — bug fixes, single features, focused changes\n- extended: 5-15 minutes — multi-file changes, complex features\n- deep: over 15 minutes — major features, refactors, investigations\n\nSet isQuick=true if quick. Set needsPlan=true if extended or deep. Set isDeep=true if deep.",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "isQuick": { "type": "boolean" },
+            "needsPlan": { "type": "boolean" },
+            "isDeep": { "type": "boolean" }
+          },
+          "required": ["isQuick", "needsPlan", "isDeep"]
+        },
+        "sound_effect": null
+      },
+      "efd9abbb-8330-42d3-af91-b353d87e5983": {
+        "id": "efd9abbb-8330-42d3-af91-b353d87e5983",
+        "type": "branch",
+        "name": "IS_QUICK?",
+        "position": {
+          "x": 300,
+          "y": 250
+        },
+        "condition": "isQuick"
+      },
+      "a7adbf2c-9ffb-4025-8c2b-039fea9048d7": {
+        "id": "a7adbf2c-9ffb-4025-8c2b-039fea9048d7",
+        "type": "prompt",
+        "name": "DO_IT",
+        "position": {
+          "x": 300,
+          "y": 350
+        },
+        "prompt": "[Automated flowchart step — output goes to the user.]\n\nExecute this task:\n$1",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "682b9b03-1ac2-4eae-b932-5c03196f41b9": {
+        "id": "682b9b03-1ac2-4eae-b932-5c03196f41b9",
+        "type": "end",
+        "name": "END_QUICK",
+        "position": {
+          "x": 300,
+          "y": 450
+        }
+      },
+      "183db138-50a3-4b75-868e-9cc9bf0864c8": {
+        "id": "183db138-50a3-4b75-868e-9cc9bf0864c8",
+        "type": "prompt",
+        "name": "OBSERVE",
+        "position": {
+          "x": 600,
+          "y": 250
+        },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nDefine 3-5 testable pass/fail criteria for this task. Include one anti-criterion. Bullet points only, no elaboration.\n$1",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "criteria": {
+              "type": "string"
+            }
+          },
+          "required": ["criteria"]
+        },
+        "sound_effect": null
+      },
+      "cd1ef9b2-79d5-4836-a111-5d9194084198": {
+        "id": "cd1ef9b2-79d5-4836-a111-5d9194084198",
+        "type": "prompt",
+        "name": "THINK",
+        "position": {
+          "x": 600,
+          "y": 350
+        },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nRiskiest assumption? Criteria gaps? Scope issues? One sentence each.\n$1",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "de8207c9-23e4-4abf-8220-b2d939e0f747": {
+        "id": "de8207c9-23e4-4abf-8220-b2d939e0f747",
+        "type": "branch",
+        "name": "NEEDS_PLAN?",
+        "position": {
+          "x": 600,
+          "y": 450
+        },
+        "condition": "needsPlan"
+      },
+      "cd9d6f3f-e72c-4e37-af66-204645f74352": {
+        "id": "cd9d6f3f-e72c-4e37-af66-204645f74352",
+        "type": "prompt",
+        "name": "PLAN",
+        "position": {
+          "x": 600,
+          "y": 550
+        },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nFiles to change, dependencies, verification approach. Bullet points only.\n$1",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "653bcacd-8788-4388-96cf-e05b7189bbe4": {
+        "id": "653bcacd-8788-4388-96cf-e05b7189bbe4",
+        "type": "prompt",
+        "name": "BUILD_EXECUTE",
+        "position": {
+          "x": 600,
+          "y": 650
+        },
+        "prompt": "[Automated flowchart step — output goes to the user.]\n\nImplement the task. Test alongside building, not after. The original request:\n$1",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "13cd2667-732c-4ac3-b856-1771a7d1922a": {
+        "id": "13cd2667-732c-4ac3-b856-1771a7d1922a",
+        "type": "prompt",
+        "name": "VERIFY",
+        "position": {
+          "x": 600,
+          "y": 750
+        },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nCheck each criterion. Evidence + PASS/FAIL, one line each.",
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "allPassed": {
+              "type": "boolean"
+            }
+          },
+          "required": ["allPassed"]
+        },
+        "sound_effect": null
+      },
+      "61090878-79df-4aac-8514-5bcc8cebd0b6": {
+        "id": "61090878-79df-4aac-8514-5bcc8cebd0b6",
+        "type": "branch",
+        "name": "ALL_PASSED?",
+        "position": {
+          "x": 600,
+          "y": 850
+        },
+        "condition": "allPassed"
+      },
+      "5d053c1c-9b33-4f3a-83dc-c0f0d9b52b64": {
+        "id": "5d053c1c-9b33-4f3a-83dc-c0f0d9b52b64",
+        "type": "refresh",
+        "name": "REFRESH",
+        "position": {
+          "x": 900,
+          "y": 850
+        }
+      },
+      "979ca38c-b2cd-44fc-adeb-333e55a75e94": {
+        "id": "979ca38c-b2cd-44fc-adeb-333e55a75e94",
+        "type": "branch",
+        "name": "IS_DEEP?",
+        "position": {
+          "x": 600,
+          "y": 950
+        },
+        "condition": "isDeep"
+      },
+      "734e8dfc-8823-493f-8553-b073331313e7": {
+        "id": "734e8dfc-8823-493f-8553-b073331313e7",
+        "type": "prompt",
+        "name": "LEARN",
+        "position": {
+          "x": 600,
+          "y": 1050
+        },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nOne sentence: what assumption was wrong?",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "f51848a3-2a57-4347-ad78-36e2e08c7c83": {
+        "id": "f51848a3-2a57-4347-ad78-36e2e08c7c83",
+        "type": "end",
+        "name": "END_DEEP",
+        "position": {
+          "x": 600,
+          "y": 1150
+        }
+      },
+      "5859ce3f-ba06-4b28-ad70-4106c723ae98": {
+        "id": "5859ce3f-ba06-4b28-ad70-4106c723ae98",
+        "type": "end",
+        "name": "END_MAIN",
+        "position": {
+          "x": 900,
+          "y": 950
+        }
+      }
+    },
+    "connections": [
+      {
+        "id": "14f369bb-ad8d-407e-88f3-8fe50f4a47bf",
+        "source_block_id": "e3f86787-2866-400b-93f5-066d652286fa",
+        "target_block_id": "c4035521-eea1-482c-b901-965f925aa93d",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "850c3bf0-49c7-416c-b5b1-17aa7b609535",
+        "source_block_id": "c4035521-eea1-482c-b901-965f925aa93d",
+        "target_block_id": "efd9abbb-8330-42d3-af91-b353d87e5983",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "57878785-0b3e-40e4-979c-8676161ca33a",
+        "source_block_id": "efd9abbb-8330-42d3-af91-b353d87e5983",
+        "target_block_id": "a7adbf2c-9ffb-4025-8c2b-039fea9048d7",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "e8aff404-e1f3-4cfd-ba34-5be84c2e6623",
+        "source_block_id": "a7adbf2c-9ffb-4025-8c2b-039fea9048d7",
+        "target_block_id": "682b9b03-1ac2-4eae-b932-5c03196f41b9",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "361fa062-013a-46dd-adde-8adaa3573264",
+        "source_block_id": "efd9abbb-8330-42d3-af91-b353d87e5983",
+        "target_block_id": "183db138-50a3-4b75-868e-9cc9bf0864c8",
+        "source_port": "right",
+        "target_port": "top",
+        "is_true_path": false,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "0ff3c33e-8613-4b4f-871e-9530172eb087",
+        "source_block_id": "183db138-50a3-4b75-868e-9cc9bf0864c8",
+        "target_block_id": "cd1ef9b2-79d5-4836-a111-5d9194084198",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "4dcd8a35-4a02-481a-84c1-c72528f59aa9",
+        "source_block_id": "cd1ef9b2-79d5-4836-a111-5d9194084198",
+        "target_block_id": "de8207c9-23e4-4abf-8220-b2d939e0f747",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "0b3b0a6e-42a0-45bc-ae32-6f32ac20ccdc",
+        "source_block_id": "de8207c9-23e4-4abf-8220-b2d939e0f747",
+        "target_block_id": "cd9d6f3f-e72c-4e37-af66-204645f74352",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "72a3c629-4f67-43e0-9cbf-f8be43e2dbc9",
+        "source_block_id": "cd9d6f3f-e72c-4e37-af66-204645f74352",
+        "target_block_id": "653bcacd-8788-4388-96cf-e05b7189bbe4",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "be72f73b-4566-45b5-98d3-85f237c6fb38",
+        "source_block_id": "de8207c9-23e4-4abf-8220-b2d939e0f747",
+        "target_block_id": "653bcacd-8788-4388-96cf-e05b7189bbe4",
+        "source_port": "right",
+        "target_port": "left",
+        "is_true_path": false,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "f81a2e0a-5378-4388-abc3-8871c527ed5e",
+        "source_block_id": "653bcacd-8788-4388-96cf-e05b7189bbe4",
+        "target_block_id": "13cd2667-732c-4ac3-b856-1771a7d1922a",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "d0b121de-400b-4c16-9d7b-ba35ccf8e080",
+        "source_block_id": "13cd2667-732c-4ac3-b856-1771a7d1922a",
+        "target_block_id": "61090878-79df-4aac-8514-5bcc8cebd0b6",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "a1c3e8f7-5b2d-4a91-bc63-8d4f12e09a3b",
+        "source_block_id": "61090878-79df-4aac-8514-5bcc8cebd0b6",
+        "target_block_id": "5d053c1c-9b33-4f3a-83dc-c0f0d9b52b64",
+        "source_port": "right",
+        "target_port": "left",
+        "is_true_path": false,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "b2d4f9a8-6c3e-4b82-ad74-9e5a23f10b4c",
+        "source_block_id": "5d053c1c-9b33-4f3a-83dc-c0f0d9b52b64",
+        "target_block_id": "653bcacd-8788-4388-96cf-e05b7189bbe4",
+        "source_port": "bottom",
+        "target_port": "right",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "c3e5a0b9-7d4f-4c93-be85-0f6b34a21c5d",
+        "source_block_id": "61090878-79df-4aac-8514-5bcc8cebd0b6",
+        "target_block_id": "979ca38c-b2cd-44fc-adeb-333e55a75e94",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "d4f6b1ca-8e5a-4da4-cf96-1a7c45b32d6e",
+        "source_block_id": "979ca38c-b2cd-44fc-adeb-333e55a75e94",
+        "target_block_id": "734e8dfc-8823-493f-8553-b073331313e7",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "e5a7c2db-9f6b-4eb5-d0a7-2b8d56c43e7f",
+        "source_block_id": "734e8dfc-8823-493f-8553-b073331313e7",
+        "target_block_id": "f51848a3-2a57-4347-ad78-36e2e08c7c83",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "f6b8d3ec-0a7c-4fc6-e1b8-3c9e67d54f80",
+        "source_block_id": "979ca38c-b2cd-44fc-adeb-333e55a75e94",
+        "target_block_id": "5859ce3f-ba06-4b28-ad70-4106c723ae98",
+        "source_port": "right",
+        "target_port": "top",
+        "is_true_path": false,
+        "condition": null,
+        "label": null
+      }
+    ],
+    "start_block_id": "e3f86787-2866-400b-93f5-066d652286fa"
+  },
+  "metadata": {
+    "created": "2026-03-02T00:00:00.000000",
+    "modified": "2026-03-02T00:00:00.000000",
+    "version": "1.0",
+    "author": null,
+    "tags": []
+  },
+  "arguments": [
+    { "name": "message", "description": "The task to execute", "required": true }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "audience": "all",
+  "prompt_hooks": {
+    "report_records": "report-records.md"
+  }
+}
