@@ -928,8 +928,9 @@ async def stream_response_to_channel(session: AgentSession, channel: TextChannel
         await _flush_text(ctx, session, channel, "post_loop")
     log.info("STREAM_END[%s] result=ok msgs=%d flushes=%d", stream_id, ctx.msg_total, ctx.flush_count)
 
-    mentions = " ".join(f"<@{uid}>" for uid in config.ALLOWED_USER_IDS)
-    await channel.send(mentions)
+    if config.SHOW_AWAITING_INPUT:
+        mentions = " ".join(f"<@{uid}>" for uid in config.ALLOWED_USER_IDS)
+        await channel.send(mentions)
 
     ttfe_ms = (t_first_event - t0) * 1000 if t_first_event is not None else -1
     span.set_attributes({

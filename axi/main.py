@@ -543,11 +543,16 @@ async def _recover_stranded_messages() -> None:
 
 
 async def _auto_sleep_idle_agents(now_utc: datetime) -> None:
-    """Put idle awake agents to sleep after IDLE_SLEEP_SECONDS of inactivity.
+    """Put idle awake agents to sleep after inactivity.
 
-    Scheduler handles eviction under pressure; this is just cleanup.
+    Under concurrency pressure (at MAX_AWAKE_AGENTS), sleep idle agents immediately.
+    Otherwise wait IDLE_SLEEP_SECONDS.
     """
-    idle_threshold = timedelta(seconds=config.IDLE_SLEEP_SECONDS)
+    awake_count = agents.count_awake_agents()
+    under_pressure = awake_count >= config.MAX_AWAKE_AGENTS
+    idle_threshold = timedelta(seconds=0) if under_pressure else timedelta(seconds=config.IDLE_SLEEP_SECONDS)
+    if under_pressure:
+        log.info("Concurrency pressure: %d/%d awake agents — aggressive idle sleep", awake_count, config.MAX_AWAKE_AGENTS)
 
     for agent_name, session in list(agents.agents.items()):
         if session.client is None:
@@ -558,7 +563,7 @@ async def _auto_sleep_idle_agents(now_utc: datetime) -> None:
             continue
         idle_duration = now_utc - session.last_activity
         if idle_duration > idle_threshold:
-            log.info("Auto-sleeping idle agent '%s' (idle %.0fs)", agent_name, idle_duration.total_seconds())
+            log.info("Auto-sleeping idle agent '%s' (idle %.0fs, pressure=%s)", agent_name, idle_duration.total_seconds(), under_pressure)
             try:
                 await agents.sleep_agent(session)
             except Exception:
@@ -889,7 +894,16 @@ async def list_agents(interaction: discord.Interaction) -> None:
 
     awake = agents.count_awake_agents()
     header = f"*System:* **Agent Sessions** ({awake}/{config.MAX_AWAKE_AGENTS} awake):\n"
-    await interaction.response.send_message(header + "\n".join(lines))
+    full_text = header + "\n".join(lines)
+    if len(full_text) <= 2000:
+        await interaction.response.send_message(full_text)
+    else:
+        from discordquery import split_message
+
+        parts = split_message(full_text)
+        await interaction.response.send_message(parts[0])
+        for part in parts[1:]:
+            await interaction.followup.send(part)
 
 
 @bot.tree.command(name="status", description="Show what an agent is currently doing.")
@@ -1072,6 +1086,35 @@ async def debug_command(interaction: discord.Interaction, mode: str | None = Non
 
     state = "on" if discord_state(session).debug else "off"
     await interaction.response.send_message(f"*System:* Debug output **{state}** for **{agent_name}**.")
+
+
+@bot.tree.command(name="debug-all", description="Toggle debug output (tool calls, thinking) for ALL agents.")
+async def debug_all_command(interaction: discord.Interaction, mode: str | None = None) -> None:
+    log.info("Slash command /debug-all mode=%s from %s", mode, interaction.user)
+
+    if mode is not None:
+        mode_lower = mode.strip().lower()
+        if mode_lower == "on":
+            new_state = True
+        elif mode_lower == "off":
+            new_state = False
+        else:
+            await interaction.response.send_message(
+                "Usage: `/debug-all` (toggle), `/debug-all on`, `/debug-all off`", ephemeral=True
+            )
+            return
+    else:
+        # Toggle based on majority: if most are on, turn all off; otherwise turn all on
+        on_count = sum(1 for s in agents.agents.values() if discord_state(s).debug)
+        new_state = on_count <= len(agents.agents) // 2
+
+    for session in agents.agents.values():
+        discord_state(session).debug = new_state
+
+    state = "on" if new_state else "off"
+    await interaction.response.send_message(
+        f"*System:* Debug output **{state}** for all **{len(agents.agents)}** agents."
+    )
 
 
 @bot.tree.command(name="kill-agent", description="Terminate an agent session.")
