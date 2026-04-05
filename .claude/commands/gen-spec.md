@@ -8,7 +8,7 @@ Analyzes a directory's source code and git history to produce a `SPEC.md` with:
 Incremental: if a `SPEC.md` already exists, it diffs against it and marks new/changed/removed entries.
 
 **Usage:** `/gen-spec <directory>`
-Example: `/gen-spec axi-py/axi` or `/gen-spec axi-rs/crates/axi/src`
+Example: `/gen-spec axi` or `/gen-spec packages/agenthub`
 
 You are generating a behavioral specification for the code in the target directory: `$ARGUMENTS`
 

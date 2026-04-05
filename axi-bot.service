@@ -7,11 +7,9 @@ StartLimitIntervalSec=300
 
 [Service]
 Type=simple
-WorkingDirectory=/home/pride/coding-projects/personal-assistant/axi-py
-ExecStart=/home/pride/.local/bin/uv run python -m axi.supervisor
+WorkingDirectory=/home/pride/coding-projects/personal-assistant
+ExecStart=/usr/bin/uv run python -m axi.supervisor
 Restart=always
-RestartPreventExitStatus=0 SIGTERM
-SuccessExitStatus=42
 RestartSec=5
 TimeoutStopSec=15
 Environment="HOME=/home/pride"
