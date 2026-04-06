@@ -448,7 +448,8 @@ class GraphWalker:
 
             # Resolve the command
             try:
-                cmd = resolve_command(block.command_name, search_paths=self._search_paths)
+                resolved_name = evaluate_template(block.command_name, self._variables)
+                cmd = resolve_command(resolved_name, search_paths=self._search_paths)
             except CommandNotFoundError as e:
                 span.set_status(trace.StatusCode.ERROR, str(e))
                 return BlockResult.fail(str(e))

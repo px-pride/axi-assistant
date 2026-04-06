@@ -398,3 +398,38 @@ class TestCommandBlockRecursion:
             # Positional args from child should not leak
             assert "$1" not in result.variables
             assert "$2" not in result.variables
+
+    async def test_command_name_template_evaluation(self):
+        """command_name with template variables resolves before lookup."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _write_command(Path(tmpdir), "test-sub", _simple_sub_command())
+
+            fc = Flowchart(
+                blocks={
+                    "s": StartBlock(id="s"),
+                    "v": VariableBlock(
+                        id="v", variable_name="cmd", variable_value="test-sub",
+                    ),
+                    "c": CommandBlock(
+                        id="c", command_name="{{cmd}}",
+                        arguments="hello",
+                        merge_output=True,
+                    ),
+                    "e": EndBlock(id="e"),
+                },
+                connections=[
+                    Connection(source_id="s", target_id="v"),
+                    Connection(source_id="v", target_id="c"),
+                    Connection(source_id="c", target_id="e"),
+                ],
+            )
+
+            session = MockSession(["Sub response"])
+            proto = MockProtocol()
+            walker = GraphWalker(
+                fc, session, {}, proto, search_paths=[tmpdir]
+            )
+            result = await walker.run()
+
+            assert result.status == "completed"
+            assert result.variables.get("sub_result") == "done"

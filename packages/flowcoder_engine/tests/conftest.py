@@ -62,14 +62,14 @@ class MockProtocol:
     def emit(self, msg: dict) -> None:
         self.messages.append(msg)
 
-    def emit_block_start(self, block_id: str, block_name: str, block_type: str) -> None:
+    def emit_block_start(self, block_id: str, block_name: str, block_type: str, *, has_output_schema: bool = False) -> None:
         self.messages.append({
             "type": "system",
             "subtype": "block_start",
             "data": {"block_id": block_id, "block_name": block_name, "block_type": block_type},
         })
 
-    def emit_block_complete(self, block_id: str, block_name: str, success: bool) -> None:
+    def emit_block_complete(self, block_id: str, block_name: str, success: bool, *, has_output_schema: bool = False) -> None:
         self.messages.append({
             "type": "system",
             "subtype": "block_complete",
