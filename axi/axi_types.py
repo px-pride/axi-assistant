@@ -82,7 +82,14 @@ class DiscordAgentState:
     system_prompt_posted: bool = False
     # Idle notification state
     last_idle_notified: datetime | None = None
-    # Debug mode (post tool calls and thinking to Discord)
+    # Verbose mode (post tool calls, thinking content, FC block names to Discord)
+    verbose: bool = field(
+        default_factory=lambda: os.environ.get("DISCORD_VERBOSE", "").strip().lower()
+        in ("1", "true", "on")
+        or os.environ.get("DISCORD_DEBUG", "").strip().lower()
+        in ("1", "true", "on")
+    )
+    # Debug mode (verbose + stderr output to Discord)
     debug: bool = field(
         default_factory=lambda: os.environ.get("DISCORD_DEBUG", "").strip().lower()
         in ("1", "true", "on")

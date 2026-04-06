@@ -61,14 +61,14 @@ async def _drain_and_send_stderr(session: AgentSession, channel: TextChannel) ->
     """Drain stderr buffer and optionally send output as code blocks.
 
     Always drains the buffer (to prevent unbounded growth).
-    Only sends to Discord when the agent has debug mode enabled
-    (session.agent_log is set), keeping channels clean in normal operation.
+    Only sends to Discord when the agent has debug mode enabled,
+    keeping channels clean in normal operation.
     """
     ds = discord_state(session)
     with ds.stderr_lock:
         msgs = list(ds.stderr_buffer)
         ds.stderr_buffer.clear()
-    if not session.agent_log:
+    if not ds.debug:
         return
     for stderr_msg in msgs:
         stderr_text = stderr_msg.strip()
@@ -554,7 +554,7 @@ async def _handle_stream_event(
         ctx.tool_input_json = ""
 
     # Debug output
-    if discord_state(session).debug and event_type == "content_block_stop":
+    if discord_state(session).verbose and event_type == "content_block_stop":
         if session.activity.phase == "thinking" and session.activity.thinking_text:
             thinking = session.activity.thinking_text.strip()
             if thinking:
@@ -766,7 +766,7 @@ async def _handle_system_message(
             query_started=session.activity.query_started,
         )
         ds = discord_state(session)
-        if block_type not in _SILENT_BLOCK_TYPES and (ds.debug or ds.fc_current_command not in _FC_QUIET_COMMANDS):
+        if block_type not in _SILENT_BLOCK_TYPES and (ds.verbose or ds.fc_current_command not in _FC_QUIET_COMMANDS):
             await channel.send(f"\u25b6 **{block_name}** (`{block_type}`)")
 
     elif msg.subtype == "block_complete":
@@ -779,7 +779,7 @@ async def _handle_system_message(
             ctx.suppress_stream = False
         data = msg.data.get("data", {})
         ds = discord_state(session)
-        if not data.get("success", True) and (ds.debug or ds.fc_current_command not in _FC_QUIET_COMMANDS):
+        if not data.get("success", True) and (ds.verbose or ds.fc_current_command not in _FC_QUIET_COMMANDS):
             block_name = data.get("block_name", "?")
             await channel.send(f"> {block_name} **FAILED**")
 

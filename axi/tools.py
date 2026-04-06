@@ -17,7 +17,6 @@ __all__ = [
 import json
 import logging
 import os
-import subprocess
 from typing import TYPE_CHECKING, Any
 
 import arrow
@@ -74,10 +73,6 @@ _tracer = trace.get_tracer(__name__)
                 "items": {"type": "string"},
                 "description": "Optional list of extension names to load into this agent's system prompt. Defaults to DEFAULT_EXTENSIONS. Pass [] to disable extensions.",
             },
-            "no_worktree": {
-                "type": "boolean",
-                "description": "Skip auto-worktree creation and use cwd directly (default: false)",
-            },
             "compact_instructions": {
                 "type": "string",
                 "description": "Instructions for what to preserve during context compaction (e.g. 'always preserve the bug description, current fix approach, and test results')",
@@ -104,7 +99,6 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
     fc_command = args.get("command", "")
     fc_command_args = args.get("command_args", "")
     agent_extensions = args.get("extensions")  # None = use defaults, [] = no extensions
-    no_worktree = args.get("no_worktree", False)
     compact_instructions = args.get("compact_instructions")
     mcp_server_names: list[str] = args.get("mcp_servers") or []
 
@@ -142,35 +136,6 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
                 "content": [{"type": "text", "text": "Error: flowcoder integration is disabled."}],
                 "is_error": True,
             }
-
-    # Auto-create worktree if cwd points to the main repo
-    if agent_cwd == os.path.realpath(config.BOT_DIR) and not no_worktree and agent_name:
-        worktree_path = os.path.join(config.BOT_WORKTREES_DIR, agent_name)
-        branch = f"feature/{agent_name}"
-        if not os.path.isdir(worktree_path):
-            result = subprocess.run(
-                ["git", "-C", config.BOT_DIR, "worktree", "add", worktree_path, "-b", branch],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0:
-                # Branch might already exist, try without -b
-                result = subprocess.run(
-                    ["git", "-C", config.BOT_DIR, "worktree", "add", worktree_path, branch],
-                    capture_output=True,
-                    text=True,
-                )
-                if result.returncode != 0:
-                    log.warning("Failed to create worktree for '%s': %s", agent_name, result.stderr.strip())
-                else:
-                    agent_cwd = worktree_path
-                    log.info("Auto-created worktree for '%s' at %s (existing branch)", agent_name, worktree_path)
-            else:
-                agent_cwd = worktree_path
-                log.info("Auto-created worktree for '%s' at %s", agent_name, worktree_path)
-        else:
-            agent_cwd = worktree_path
-            log.info("Reusing existing worktree for '%s' at %s", agent_name, worktree_path)
 
     # Use global ALLOWED_CWDS (which includes ALLOWED_CWDS and ADMIN_ALLOWED_CWDS from .env)
     if not any(agent_cwd == d or agent_cwd.startswith(d + os.sep) for d in config.ALLOWED_CWDS):
