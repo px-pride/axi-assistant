@@ -8,22 +8,38 @@
         "id": "fb770137-ab01-4880-8f9c-ac85fe93b800",
         "type": "start",
         "name": "START",
-        "position": { "x": 300, "y": 50 }
+        "position": {
+          "x": 300,
+          "y": 50
+        }
       },
       "f254fe46-5b53-4a9f-808a-169da351c00d": {
         "id": "f254fe46-5b53-4a9f-808a-169da351c00d",
         "type": "prompt",
         "name": "CLASSIFY",
-        "position": { "x": 300, "y": 450 },
-        "prompt": "[Automated flowchart step — not a user message.]\n\nYou received this message from the user:\n$5\n\n1. Is this a task requiring you to take action (create, change, investigate, implement something), or conversation/question you can answer directly?\n2. Does the message relate to any of these topics: scheduling, agent spawning, or discord message queries?\n   If yes, list the absolute file paths of ALL relevant reference docs (comma-separated). If no, return an empty string for refFiles.\n   - Scheduling: /home/pride/coding-projects/personal-assistant/prompts/refs/scheduling.md\n   - Agent spawning: /home/pride/coding-projects/personal-assistant/prompts/refs/agent-spawning.md\n   - Discord message queries: /home/pride/coding-projects/personal-assistant/prompts/refs/discord-query.md",
+        "position": {
+          "x": 300,
+          "y": 450
+        },
+        "prompt": "[Automated flowchart step — not a user message.]\n\nYou received this message from the user:\n$5\n\n1. Is this a task requiring you to take action (create, change, investigate, implement something), or conversation/question you can answer directly?\n2. Does the message relate to any of these topics: scheduling, agent spawning?\n   If yes, list the absolute file paths of ALL relevant reference docs (comma-separated). If no, return an empty string for refFiles.\n   - Scheduling: /home/pride/coding-projects/personal-assistant/prompts/refs/scheduling.md\n   - Agent spawning: /home/pride/coding-projects/personal-assistant/prompts/refs/agent-spawning.md",
         "output_schema": {
           "type": "object",
           "properties": {
-            "isTask": { "type": "boolean" },
-            "hasRefTopics": { "type": "boolean" },
-            "refFiles": { "type": "string" }
+            "isTask": {
+              "type": "boolean"
+            },
+            "hasRefTopics": {
+              "type": "boolean"
+            },
+            "refFiles": {
+              "type": "string"
+            }
           },
-          "required": ["isTask", "hasRefTopics", "refFiles"]
+          "required": [
+            "isTask",
+            "hasRefTopics",
+            "refFiles"
+          ]
         },
         "sound_effect": null
       },
@@ -31,14 +47,20 @@
         "id": "5599ae45-0a3c-4da1-b4e0-741a976ceef8",
         "type": "branch",
         "name": "HAS_REF_TOPICS?",
-        "position": { "x": 300, "y": 550 },
+        "position": {
+          "x": 300,
+          "y": 550
+        },
         "condition": "hasRefTopics"
       },
       "8cc18feb-16b9-4b46-835b-b4b673ed9fbf": {
         "id": "8cc18feb-16b9-4b46-835b-b4b673ed9fbf",
         "type": "prompt",
         "name": "READ_REFS",
-        "position": { "x": 300, "y": 650 },
+        "position": {
+          "x": 300,
+          "y": 650
+        },
         "prompt": "[Automated flowchart step — not a user message.]\n\nRead the reference docs you identified above. Do not read docs you did not identify as relevant. Do not output any text.",
         "output_schema": null,
         "sound_effect": null
@@ -47,14 +69,20 @@
         "id": "919fad3e-8ede-43e7-bd83-50ad052a462f",
         "type": "branch",
         "name": "IS_TASK?",
-        "position": { "x": 300, "y": 750 },
+        "position": {
+          "x": 300,
+          "y": 750
+        },
         "condition": "isTask"
       },
       "0d58740d-be83-45ab-b05d-4f6da4f87b50": {
         "id": "0d58740d-be83-45ab-b05d-4f6da4f87b50",
         "type": "prompt",
         "name": "RESPOND",
-        "position": { "x": 600, "y": 750 },
+        "position": {
+          "x": 600,
+          "y": 750
+        },
         "prompt": "[Automated flowchart step — output goes to the user.]\n\nThe user's message was classified as conversation (not a task). Respond directly:\n\n$5",
         "output_schema": null,
         "sound_effect": null
@@ -63,14 +91,20 @@
         "id": "7c5beb11-d93f-446f-aa66-5624b04ec4b7",
         "type": "branch",
         "name": "HAS_POST_RESPOND?",
-        "position": { "x": 600, "y": 850 },
+        "position": {
+          "x": 600,
+          "y": 850
+        },
         "condition": "post_respond"
       },
       "df9c142f-e1f3-4f65-a38d-4ff165fdca51": {
         "id": "df9c142f-e1f3-4f65-a38d-4ff165fdca51",
         "type": "command",
         "name": "RUN_POST_RESPOND",
-        "position": { "x": 600, "y": 950 },
+        "position": {
+          "x": 600,
+          "y": 950
+        },
         "command_name": "$4",
         "arguments": "$5",
         "inherit_variables": false,
@@ -80,14 +114,21 @@
         "id": "43d3f6c7-bba8-4b04-8ca9-afe5b7bdeead",
         "type": "prompt",
         "name": "GATHER_NEXT_ACTION_A",
-        "position": { "x": 600, "y": 1050 },
+        "position": {
+          "x": 600,
+          "y": 1050
+        },
         "prompt": "[Automated flowchart step — not a user message.]\n\nDetermine the USER's next action — not yours, the human user's. Ground this in your project status records: check for the next-in-line incomplete task.\n\nIf there is a next-in-line task, that IS the user's next action — state it directly. Do not offer alternatives or list other tasks. Do not ask the user to decide.\n\nDo not output any text.",
         "output_schema": {
           "type": "object",
           "properties": {
-            "nextAction": { "type": "string" }
+            "nextAction": {
+              "type": "string"
+            }
           },
-          "required": ["nextAction"]
+          "required": [
+            "nextAction"
+          ]
         },
         "sound_effect": null
       },
@@ -95,7 +136,10 @@
         "id": "set-status-a",
         "type": "prompt",
         "name": "SET_STATUS_A",
-        "position": { "x": 600, "y": 1150 },
+        "position": {
+          "x": 600,
+          "y": 1150
+        },
         "prompt": "[Automated flowchart step — not a user message.]\n\nBased on the next action you determined, pick the emoji that best represents the **type of to-do** the user has, and call set_channel_status. Do not output any text.\n\nCommon to-do types:\n- 📚 User should read a long response or review a document you produced\n- 🔬 User needs to test something manually that you can't verify yourself\n- 💬 User needs to respond — you asked a question, need approval, or are waiting for direction\n\n**Custom emoji** — if none of the above fit, pick any single emoji that captures the user's to-do type (e.g. 📍 for location scouting, 💰 for budgeting, ✍️ for writing). Use your judgment. Being specific is better than being generic.\n\n**Never use ✅ (checkmark)** — a checkmark is meaningless as a user to-do. It tells the user nothing about what they need to do next.\n\n- ❓ **Last resort only** — you genuinely have no idea what the user wants next and cannot infer it from context, pending tasks, or conversation history. Exhaust other options first.\n\n**Never set ⏳ yourself** — hourglass is applied automatically when you start processing. Setting it manually will conflict with the auto-hourglass system.",
         "output_schema": null,
         "sound_effect": null
@@ -104,20 +148,29 @@
         "id": "86ba2b4c-46fd-4efa-bd4f-79ba420d7f6f",
         "type": "end",
         "name": "END_A",
-        "position": { "x": 600, "y": 1250 }
+        "position": {
+          "x": 600,
+          "y": 1250
+        }
       },
       "82e4da96-18f0-4527-b90e-8de774583257": {
         "id": "82e4da96-18f0-4527-b90e-8de774583257",
         "type": "branch",
         "name": "HAS_PRE_TASK?",
-        "position": { "x": 300, "y": 950 },
+        "position": {
+          "x": 300,
+          "y": 950
+        },
         "condition": "pre_task"
       },
       "ccafb3a6-e00b-441c-bd02-b227681184eb": {
         "id": "ccafb3a6-e00b-441c-bd02-b227681184eb",
         "type": "command",
         "name": "RUN_PRE_TASK",
-        "position": { "x": 300, "y": 1050 },
+        "position": {
+          "x": 300,
+          "y": 1050
+        },
         "command_name": "$1",
         "arguments": "$5",
         "inherit_variables": false,
@@ -127,14 +180,20 @@
         "id": "e94ec282-afee-4025-b87e-25c5a170f828",
         "type": "branch",
         "name": "HAS_EXECUTE?",
-        "position": { "x": 300, "y": 1150 },
+        "position": {
+          "x": 300,
+          "y": 1150
+        },
         "condition": "execute"
       },
       "4eefaf88-8136-4314-85ee-efa056247418": {
         "id": "4eefaf88-8136-4314-85ee-efa056247418",
         "type": "command",
         "name": "RUN_EXECUTE",
-        "position": { "x": 300, "y": 1250 },
+        "position": {
+          "x": 300,
+          "y": 1250
+        },
         "command_name": "$2",
         "arguments": "$5",
         "inherit_variables": false,
@@ -144,7 +203,10 @@
         "id": "8df8f16e-e261-4301-ac9c-2e708debd357",
         "type": "prompt",
         "name": "BARE_DO_IT",
-        "position": { "x": 550, "y": 1250 },
+        "position": {
+          "x": 550,
+          "y": 1250
+        },
         "prompt": "[Automated flowchart step — output goes to the user.]\n\nThe user's message was classified as a task. Handle it — remember to default to read/analyze/diagnose unless the user explicitly asked for changes:\n\n$5",
         "output_schema": null,
         "sound_effect": null
@@ -153,14 +215,21 @@
         "id": "0d8764e2-abc8-4412-bd7a-8ba2849e681a",
         "type": "prompt",
         "name": "TEST_COMPLETION",
-        "position": { "x": 300, "y": 1350 },
+        "position": {
+          "x": 300,
+          "y": 1350
+        },
         "prompt": "[Automated flowchart step — not a user message.]\n\nDoes the work just completed require manual testing you cannot perform yourself?",
         "output_schema": {
           "type": "object",
           "properties": {
-            "manualTestingNeeded": { "type": "boolean" }
+            "manualTestingNeeded": {
+              "type": "boolean"
+            }
           },
-          "required": ["manualTestingNeeded"]
+          "required": [
+            "manualTestingNeeded"
+          ]
         },
         "sound_effect": null
       },
@@ -168,14 +237,20 @@
         "id": "0e7d4411-710b-4d80-bbde-7f28fb9f210a",
         "type": "branch",
         "name": "NEEDS_MANUAL?",
-        "position": { "x": 300, "y": 1450 },
+        "position": {
+          "x": 300,
+          "y": 1450
+        },
         "condition": "manualTestingNeeded"
       },
       "46a7d8fa-7256-468c-aa32-270686eb7a38": {
         "id": "46a7d8fa-7256-468c-aa32-270686eb7a38",
         "type": "prompt",
         "name": "WAIT_FOR_USER",
-        "position": { "x": 300, "y": 1550 },
+        "position": {
+          "x": 300,
+          "y": 1550
+        },
         "prompt": "[Automated flowchart step — output goes to the user.]\n\nList the specific changes you just made that require manual testing. For each change, state:\n- What was changed\n- What the user should do to test it (specific steps)\n- What a successful test looks like\n\nBe brief — use bullet points.",
         "output_schema": null,
         "sound_effect": null
@@ -184,7 +259,10 @@
         "id": "655beb32-083b-42cc-80c2-865fffcc13ca",
         "type": "prompt",
         "name": "REPORT_RECORDS",
-        "position": { "x": 300, "y": 1650 },
+        "position": {
+          "x": 300,
+          "y": 1650
+        },
         "prompt": "[Automated flowchart step — not a user message.]\n\nReport what was accomplished for this task and update the relevant records: $5\n\n$6\n\nDo not output any text to the user.",
         "output_schema": null,
         "sound_effect": null
@@ -193,14 +271,20 @@
         "id": "975cd3b2-0541-49e9-b23a-c12a1fcdaddb",
         "type": "branch",
         "name": "HAS_POST_TASK?",
-        "position": { "x": 300, "y": 1750 },
+        "position": {
+          "x": 300,
+          "y": 1750
+        },
         "condition": "post_task"
       },
       "f06fc6f3-f89c-42f4-b784-45fb8de89603": {
         "id": "f06fc6f3-f89c-42f4-b784-45fb8de89603",
         "type": "command",
         "name": "RUN_POST_TASK",
-        "position": { "x": 300, "y": 1850 },
+        "position": {
+          "x": 300,
+          "y": 1850
+        },
         "command_name": "$3",
         "arguments": "$5",
         "inherit_variables": false,
@@ -210,14 +294,21 @@
         "id": "dfba203a-8cdb-4f45-be8d-6c6fed95eb41",
         "type": "prompt",
         "name": "GATHER_NEXT_ACTION_B",
-        "position": { "x": 300, "y": 1950 },
+        "position": {
+          "x": 300,
+          "y": 1950
+        },
         "prompt": "[Automated flowchart step — not a user message.]\n\nDetermine the USER's next action — not yours, the human user's. Ground this in your project status records: check for the next-in-line incomplete task.\n\nIf there is a next-in-line task, that IS the user's next action — state it directly. Do not offer alternatives or list other tasks. Do not ask the user to decide.\n\nDo not output any text.",
         "output_schema": {
           "type": "object",
           "properties": {
-            "nextAction": { "type": "string" }
+            "nextAction": {
+              "type": "string"
+            }
           },
-          "required": ["nextAction"]
+          "required": [
+            "nextAction"
+          ]
         },
         "sound_effect": null
       },
@@ -225,7 +316,10 @@
         "id": "set-status-b",
         "type": "prompt",
         "name": "SET_STATUS_B",
-        "position": { "x": 300, "y": 2050 },
+        "position": {
+          "x": 300,
+          "y": 2050
+        },
         "prompt": "[Automated flowchart step — not a user message.]\n\nBased on the next action you determined, pick the emoji that best represents the **type of to-do** the user has, and call set_channel_status. Do not output any text.\n\nCommon to-do types:\n- 📚 User should read a long response or review a document you produced\n- 🔬 User needs to test something manually that you can't verify yourself\n- 💬 User needs to respond — you asked a question, need approval, or are waiting for direction\n\n**Custom emoji** — if none of the above fit, pick any single emoji that captures the user's to-do type (e.g. 📍 for location scouting, 💰 for budgeting, ✍️ for writing). Use your judgment. Being specific is better than being generic.\n\n**Never use ✅ (checkmark)** — a checkmark is meaningless as a user to-do. It tells the user nothing about what they need to do next.\n\n- ❓ **Last resort only** — you genuinely have no idea what the user wants next and cannot infer it from context, pending tasks, or conversation history. Exhaust other options first.\n\n**Never set ⏳ yourself** — hourglass is applied automatically when you start processing. Setting it manually will conflict with the auto-hourglass system.",
         "output_schema": null,
         "sound_effect": null
@@ -234,7 +328,10 @@
         "id": "8412b54c-cdef-401a-81c2-b3a7b850b1d0",
         "type": "end",
         "name": "END_B",
-        "position": { "x": 300, "y": 2150 }
+        "position": {
+          "x": 300,
+          "y": 2150
+        }
       }
     },
     "connections": [
@@ -546,14 +643,47 @@
     "modified": "2026-03-02T00:00:00.000000",
     "version": "1.0",
     "author": null,
-    "tags": ["soul", "message-handler", "core"]
+    "tags": [
+      "soul",
+      "message-handler",
+      "core"
+    ]
   },
   "arguments": [
-    { "name": "pre_task", "description": "Pre-task hook command name", "required": false, "default": "" },
-    { "name": "execute", "description": "Execute hook command name", "required": false, "default": "" },
-    { "name": "post_task", "description": "Post-task hook command name", "required": false, "default": "" },
-    { "name": "post_respond", "description": "Post-respond hook command name", "required": false, "default": "" },
-    { "name": "message", "description": "User's message to process", "required": true },
-    { "name": "report_records_text", "description": "In-prompt hook text for record reporting", "required": false, "default": "" }
+    {
+      "name": "pre_task",
+      "description": "Pre-task hook command name",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "execute",
+      "description": "Execute hook command name",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "post_task",
+      "description": "Post-task hook command name",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "post_respond",
+      "description": "Post-respond hook command name",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "message",
+      "description": "User's message to process",
+      "required": true
+    },
+    {
+      "name": "report_records_text",
+      "description": "In-prompt hook text for record reporting",
+      "required": false,
+      "default": ""
+    }
   ]
 }
