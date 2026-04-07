@@ -86,10 +86,8 @@ class DiscordAgentState:
     verbose: bool = field(
         default_factory=lambda: os.environ.get("DISCORD_VERBOSE", "").strip().lower()
         in ("1", "true", "on")
-        or os.environ.get("DISCORD_DEBUG", "").strip().lower()
-        in ("1", "true", "on")
     )
-    # Debug mode (verbose + stderr output to Discord)
+    # Debug mode (stderr output to Discord)
     debug: bool = field(
         default_factory=lambda: os.environ.get("DISCORD_DEBUG", "").strip().lower()
         in ("1", "true", "on")

@@ -62,17 +62,18 @@ class ProtocolHandler:
         duration_ms: int = 0,
         cost_usd: float = 0.0,
         blocks_executed: int = 0,
+        session_id: str | None = None,
     ) -> None:
         """Emit flowchart_complete when leaving takeover mode."""
-        self.emit_system(
-            "flowchart_complete",
-            {
-                "status": status,
-                "duration_ms": duration_ms,
-                "cost_usd": cost_usd,
-                "blocks_executed": blocks_executed,
-            },
-        )
+        data: dict[str, Any] = {
+            "status": status,
+            "duration_ms": duration_ms,
+            "cost_usd": cost_usd,
+            "blocks_executed": blocks_executed,
+        }
+        if session_id:
+            data["session_id"] = session_id
+        self.emit_system("flowchart_complete", data)
 
     def emit_result(
         self,

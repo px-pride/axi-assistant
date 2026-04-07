@@ -1083,7 +1083,6 @@ async def verbose_command(interaction: discord.Interaction, mode: str | None = N
             discord_state(session).verbose = True
         elif mode_lower == "off":
             discord_state(session).verbose = False
-            discord_state(session).debug = False
         else:
             await interaction.response.send_message(
                 "Usage: `/verbose` (toggle), `/verbose on`, `/verbose off`", ephemeral=True
@@ -1091,14 +1090,12 @@ async def verbose_command(interaction: discord.Interaction, mode: str | None = N
             return
     else:
         discord_state(session).verbose = not discord_state(session).verbose
-        if not discord_state(session).verbose:
-            discord_state(session).debug = False
 
     state = "on" if discord_state(session).verbose else "off"
     await interaction.response.send_message(f"*System:* Verbose output **{state}** for **{agent_name}**.")
 
 
-@bot.tree.command(name="debug", description="Toggle debug output (verbose + stderr) for an agent.")
+@bot.tree.command(name="debug", description="Toggle debug output (stderr) for an agent.")
 @app_commands.describe(mode="on / off / omit to toggle")
 async def debug_command(interaction: discord.Interaction, mode: str | None = None) -> None:
     log.info("Slash command /debug mode=%s from %s", mode, interaction.user)
@@ -1112,7 +1109,6 @@ async def debug_command(interaction: discord.Interaction, mode: str | None = Non
         mode_lower = mode.strip().lower()
         if mode_lower == "on":
             discord_state(session).debug = True
-            discord_state(session).verbose = True
         elif mode_lower == "off":
             discord_state(session).debug = False
         else:
@@ -1122,14 +1118,12 @@ async def debug_command(interaction: discord.Interaction, mode: str | None = Non
             return
     else:
         discord_state(session).debug = not discord_state(session).debug
-        if discord_state(session).debug:
-            discord_state(session).verbose = True
 
     state = "on" if discord_state(session).debug else "off"
     await interaction.response.send_message(f"*System:* Debug output **{state}** for **{agent_name}**.")
 
 
-@bot.tree.command(name="debug-all", description="Toggle debug output (verbose + stderr) for ALL agents.")
+@bot.tree.command(name="debug-all", description="Toggle debug output (stderr) for ALL agents.")
 async def debug_all_command(interaction: discord.Interaction, mode: str | None = None) -> None:
     log.info("Slash command /debug-all mode=%s from %s", mode, interaction.user)
 
@@ -1150,8 +1144,6 @@ async def debug_all_command(interaction: discord.Interaction, mode: str | None =
 
     for session in agents.agents.values():
         discord_state(session).debug = new_state
-        if new_state:
-            discord_state(session).verbose = True
 
     state = "on" if new_state else "off"
     await interaction.response.send_message(
@@ -1485,14 +1477,11 @@ async def _handle_text_command(message: discord.Message, session: AgentSession, 
                 discord_state(session).verbose = True
             elif mode_lower == "off":
                 discord_state(session).verbose = False
-                discord_state(session).debug = False
             else:
                 await agents.send_system(channel, "Usage: `//verbose` (toggle), `//verbose on`, `//verbose off`")
                 return True
         else:
             discord_state(session).verbose = not discord_state(session).verbose
-            if not discord_state(session).verbose:
-                discord_state(session).debug = False
         state = "on" if discord_state(session).verbose else "off"
         await agents.send_system(channel, f"Verbose output **{state}** for **{agent_name}**.")
         return True
@@ -1502,7 +1491,6 @@ async def _handle_text_command(message: discord.Message, session: AgentSession, 
             mode_lower = cmd_args.lower()
             if mode_lower == "on":
                 discord_state(session).debug = True
-                discord_state(session).verbose = True
             elif mode_lower == "off":
                 discord_state(session).debug = False
             else:
@@ -1510,8 +1498,6 @@ async def _handle_text_command(message: discord.Message, session: AgentSession, 
                 return True
         else:
             discord_state(session).debug = not discord_state(session).debug
-            if discord_state(session).debug:
-                discord_state(session).verbose = True
         state = "on" if discord_state(session).debug else "off"
         await agents.send_system(channel, f"Debug output **{state}** for **{agent_name}**.")
         return True

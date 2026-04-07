@@ -804,6 +804,11 @@ async def _handle_system_message(
         status = "**completed**" if data.get("status") == "completed" else "**failed**"
         assert _send_system is not None
         await _send_system(channel, f"Flowchart {status} in {duration_s:.0f}s | Cost: ${cost:.4f} | Blocks: {blocks}")
+        # Persist inner Claude's session_id so resume works after flowchart turns
+        fc_session_id = data.get("session_id")
+        if fc_session_id and fc_session_id != session.session_id:
+            assert _set_session_id_fn is not None
+            await _set_session_id_fn(session, fc_session_id, channel=channel)
 
 
 # ---------------------------------------------------------------------------

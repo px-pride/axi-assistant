@@ -448,6 +448,7 @@ async def _run_flowchart_takeover(
                 duration_ms=duration_ms,
                 cost_usd=session.total_cost,
                 blocks_executed=len(result.log),
+                session_id=session.session_id,
             )
 
             protocol.emit_result(
