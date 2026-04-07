@@ -28,9 +28,12 @@ This file is appended to the system prompt for agents working on the axi-assista
 
 Read `/home/ubuntu/axi-user-data/CODE-PHILOSOPHY.md` for the principles guiding this codebase: data-oriented design, mechanical sympathy (hardware awareness), explicit over convention, performance-aware, pragmatic functional programming, clear data flow, and no over-abstraction. This philosophy should inform all architectural decisions.
 
-## Core vs Extension Boundary
+## Core vs Extension vs User Boundary
 
-Extension-specific concepts, tools, CLIs, and record IDs must never appear in core files. Keep core wording generic and let extensions provide the specific instructions.
+Three layers, each with strict boundaries:
+- **Core files** — generic, instance-independent logic and structure. No extension-specific concepts, tools, CLIs, or record IDs. No user/instance-specific data.
+- **Extension files** — feature-specific concepts, tools, CLIs, record IDs. Keep extensions self-contained; don't leak extension concepts into core.
+- **User data** — instance-specific values (guild IDs, server names, tokens, user IDs) belong in profile ref files or runtime template variables, never hardcoded in core or extension files.
 
 Core files: SOUL.md, soul.json, axi_codebase_context.md, bot.py, handlers.py, supervisor.py, prompts.py
 
@@ -86,8 +89,7 @@ Run these via Bash:
 
 Test instances run in separate Discord guilds. Your Discord MCP tools (`discord_list_channels`, `discord_read_messages`, `discord_send_message`) work in these guilds using your own bot token.
 
-Available test guilds (from `~/.config/axi/test-config.json`):
-- **nova** — Guild ID `1475631458243710977`
+Available test guilds are configured in `~/.config/axi/test-config.json`. Run `cat ~/.config/axi/test-config.json` to see guild IDs.
 
 ### Workflow: Testing a Code Change
 
