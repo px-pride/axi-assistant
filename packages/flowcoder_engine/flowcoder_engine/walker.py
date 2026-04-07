@@ -264,6 +264,8 @@ class GraphWalker:
                     return BlockResult.ok()
                 case BlockType.END:
                     return BlockResult.ok()
+                case BlockType.EXIT:
+                    return BlockResult.ok()
                 case BlockType.PROMPT:
                     assert isinstance(block, PromptBlock)
                     return await self._exec_prompt(block)
@@ -453,6 +455,9 @@ class GraphWalker:
             except CommandNotFoundError as e:
                 span.set_status(trace.StatusCode.ERROR, str(e))
                 return BlockResult.fail(str(e))
+            except Exception as e:
+                span.set_status(trace.StatusCode.ERROR, str(e))
+                return BlockResult.fail(f"Failed to load command '{block.command_name}': {e}")
 
             # Build child variables
             child_vars: dict[str, Any] = {}
@@ -520,7 +525,7 @@ class GraphWalker:
 
     def _next_block(self, current: BlockBase, result: BlockResult) -> BlockBase | None:
         """Find the next block to execute based on connections."""
-        if current.type == BlockType.END:
+        if current.type in (BlockType.END, BlockType.EXIT):
             return None
 
         outgoing = [

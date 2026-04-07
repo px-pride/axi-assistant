@@ -21,6 +21,7 @@ class BlockType(StrEnum):
     BASH = "bash"
     COMMAND = "command"
     REFRESH = "refresh"
+    EXIT = "exit"
 
 
 # Pride compat: map int/float to number
@@ -109,6 +110,11 @@ class RefreshBlock(BlockBase):
     target_session: str | None = None
 
 
+
+class ExitBlock(BlockBase):
+    type: Literal[BlockType.EXIT] = BlockType.EXIT
+    exit_code: int = 0
+
 Block = Annotated[
     StartBlock
     | EndBlock
@@ -117,6 +123,7 @@ Block = Annotated[
     | VariableBlock
     | BashBlock
     | CommandBlock
-    | RefreshBlock,
+    | RefreshBlock
+    | ExitBlock,
     Field(discriminator="type"),
 ]
