@@ -94,6 +94,25 @@ def _install_rs_units() -> None:
         )
 
 
+def _install_py_unit() -> None:
+    """Symlink Python test unit file into ~/.config/systemd/user/ and reload."""
+    user_units = os.path.expanduser("~/.config/systemd/user")
+    os.makedirs(user_units, exist_ok=True)
+    unit = "axi-test@.service"
+    src = os.path.join(BOT_DIR, unit)
+    dst = os.path.join(user_units, unit)
+    if os.path.islink(dst) and os.readlink(dst) == src:
+        return
+    if os.path.exists(dst):
+        os.remove(dst)
+    os.symlink(src, dst)
+    subprocess.run(
+        ["systemctl", "--user", "daemon-reload"],
+        capture_output=True,
+        env=_systemctl_env(),
+    )
+
+
 def load_config() -> dict[str, Any]:
     """Load and validate test-config.json."""
     try:
@@ -702,6 +721,8 @@ def cmd_up(args: argparse.Namespace) -> None:
         _install_rs_units()
         profile = "release" if args.release else "debug"
         rs_binary = os.path.join(instance_path, "axi-rs", "target", profile, "axi")
+    else:
+        _install_py_unit()
 
     guild_name = _try_reserve(config, name, instance_path, args.guild, mode)
 
@@ -774,6 +795,10 @@ def cmd_restart(args: argparse.Namespace) -> None:
         print(f"Warning: No reservation found for '{name}' in slots file", file=sys.stderr)
 
     mode = _slot_mode(slots, name)
+    if mode == "rs":
+        _install_rs_units()
+    else:
+        _install_py_unit()
     units = _service_units(name, mode)
     print(f"Restarting {units[-1]}...")
     for unit in units:
