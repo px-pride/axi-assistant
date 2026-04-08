@@ -11,6 +11,8 @@ Key update commands:
 
 **Card conventions:**
 - Keep card names short — they render on small visual cards in the GUI.
+- **Cards must be self-contained.** A future session with no memory of the original conversation must be able to act on the card. Include the desired behavior/outcome, not just a vague label. E.g., "Prompting: master spawns duplicate agents instead of reusing existing" — not just "Bug: check for existing agent."
+- **When a card is ambiguous, investigate before acting.** Check deck notes, Discord history, or ask the user. Don't assume based on what you were recently working on.
 - **Always break tasks into multiple cards**: plan -> implement -> test -> commit/push. If a deck has only a single vague card, replace it with this breakdown. One card = one clear step.
 - When a task involves multiple distinct feature areas, each area gets its own plan -> implement -> test cycle.
 - When work is completed that has no matching card, create one (already completed) so all work is tracked.
