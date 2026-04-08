@@ -88,14 +88,9 @@ _tracer = trace.get_tracer(__name__)
             },
             "prompt": {"type": "string", "description": "Initial task instructions for the agent"},
             "resume": {"type": "string", "description": "Optional session ID to resume a previous agent session"},
-            "agent_type": {
-                "type": "string",
-                "enum": ["claude_code", "flowcoder"],
-                "description": "Agent type. 'claude_code' (default) for interactive Claude, 'flowcoder' for flowchart executor.",
-            },
             "command": {
                 "type": "string",
-                "description": "Flowcoder command name (required when agent_type='flowcoder')",
+                "description": "Flowcoder command name",
             },
             "command_args": {
                 "type": "string",
@@ -132,7 +127,7 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
     agent_cwd = os.path.realpath(os.path.expanduser(args.get("cwd", default_cwd)))
     agent_prompt = args.get("prompt", "")
     agent_resume = args.get("resume")
-    agent_type = args.get("agent_type", "claude_code")
+    agent_type = "flowcoder"
     fc_command = args.get("command", "")
     fc_command_args = args.get("command_args", "")
     agent_extensions = args.get("extensions")  # None = use defaults, [] = no extensions
@@ -167,13 +162,11 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
             "is_error": True,
         }
 
-    # Flowcoder-specific validation
-    if agent_type == "flowcoder":
-        if not config.FLOWCODER_ENABLED:
-            return {
-                "content": [{"type": "text", "text": "Error: flowcoder integration is disabled."}],
-                "is_error": True,
-            }
+    if not config.FLOWCODER_ENABLED:
+        return {
+            "content": [{"type": "text", "text": "Error: flowcoder integration is disabled."}],
+            "is_error": True,
+        }
 
     # Auto-create worktree when cwd is a git repo and another awake agent
     # already uses the same cwd (prevents concurrent edits to the same tree).
@@ -248,7 +241,7 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
         "content": [
             {
                 "type": "text",
-                "text": f"Agent '{agent_name}' ({agent_type}) spawn initiated in {agent_cwd}. The agent's channel will be notified when it's ready.",
+                "text": f"Agent '{agent_name}' (flowcoder) spawn initiated in {agent_cwd}. The agent's channel will be notified when it's ready.",
             }
         ]
     }

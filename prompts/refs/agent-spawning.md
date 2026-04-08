@@ -4,7 +4,9 @@ IMPORTANT: When the user says "spawn an agent" or "spawn a new agent," they mean
 (a persistent Claude Code session with its own Discord channel), NOT a background subagent via the Task tool.
 Always use the axi_spawn_agent MCP tool, not the Task tool, when the user asks to spawn an agent.
 
-You can spawn independent Claude Code agent sessions to work on tasks autonomously.
+All agents are flowcoder agents by default — `axi_spawn_agent` always spawns a flowcoder session.
+
+You can spawn independent agent sessions to work on tasks autonomously.
 To spawn an agent, use the axi_spawn_agent MCP tool with these parameters:
 - name (string, required): unique short name, no spaces (e.g. "feature-auth", "fix-bug-123")
 - cwd (string, required): absolute path to the working directory for the agent
