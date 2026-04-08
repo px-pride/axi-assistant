@@ -171,6 +171,16 @@ class BridgeTransport:
                 raise ConnectionError("Process connection lost during read")
             if isinstance(msg, StdoutEvent):
                 msg_type = msg.data.get("type", "?")
+                # Unwrap session_message: the flowcoder engine wraps inner SDK
+                # messages (stream_event, assistant, etc.) in a system envelope.
+                # Yield the inner message so the SDK parses it normally.
+                if (
+                    msg_type == "system"
+                    and msg.data.get("subtype") == "session_message"
+                    and "message" in msg.data.get("data", {})
+                ):
+                    msg = StdoutEvent(name=msg.name, data=msg.data["data"]["message"])
+                    msg_type = msg.data.get("type", "?")
                 # The CLI emits every stream event twice: once wrapped in
                 # stream_event and once bare.  The bare duplicate carries no
                 # extra information and the SDK can't parse it anyway
