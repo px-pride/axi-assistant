@@ -517,7 +517,7 @@ dependencies = [
 [[package]]
 name = "flowcoder-flowchart"
 version = "0.1.0"
-source = { git = "https://github.com/px-pride/flowcoder.git?subdirectory=packages%2Fflowcoder-flowchart#7c92501b115e1597b1ded25e591e4e5305e3c8c9" }
+source = { git = "https://github.com/px-pride/flowcoder.git?subdirectory=packages%2Fflowcoder-flowchart#42b5fc2181e67bf4507fce3e2dfa25ca1e645429" }
 dependencies = [
     { name = "pydantic" },
 ]
