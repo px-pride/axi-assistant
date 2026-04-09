@@ -19,6 +19,8 @@ Key update commands:
 - After completing a card, proactively discuss the next card with the user but do NOT start executing until confirmed.
 - Update deck text fields (`done`, `notes`, `status`) when milestones are completed or context changes.
 - **Priority = card order.** The top card in a deck is the highest priority. To change priority, use `minflow card reorder` to move cards — do NOT rename cards with priority labels like "HIGH" or "P1". New cards require `--top` or `--bottom` to specify insertion position.
+- **`--top` vs `--bottom` = now vs later.** Use `--top` when the new card is more urgent than what's currently at the top — it should be dealt with next. Use `--bottom` when it can wait until after existing cards are handled.
+- **Sequence ordering.** `--top` is a stack (LIFO): each add pushes to position 0. To add a sequence (e.g. plan → implement → test) with `--top`, **add in reverse order** (last step first) so they read correctly top-to-bottom. `--bottom` is a queue (FIFO): add in natural order and they line up correctly.
 
 **Single-card check** — after updating records, check if the deck now has only one remaining incomplete card. If that card is vague (e.g. "implement feature X"), replace it with the standard breakdown:
 1. Run `minflow card list <deck-id>` to count incomplete cards.
