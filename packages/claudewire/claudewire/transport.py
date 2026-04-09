@@ -181,6 +181,18 @@ class BridgeTransport:
                 ):
                     msg = StdoutEvent(name=msg.name, data=msg.data["data"]["message"])
                     msg_type = msg.data.get("type", "?")
+                # The engine forwards inner CLI stderr as stdout system
+                # messages with subtype "stderr".  Extract the line and
+                # call the stderr callback so autocompact parsing works.
+                if (
+                    msg_type == "system"
+                    and msg.data.get("subtype") == "stderr"
+                    and self._stderr_callback
+                ):
+                    line = msg.data.get("data", {}).get("line", "")
+                    if line:
+                        self._stderr_callback(line)
+                    continue
                 # The CLI emits every stream event twice: once wrapped in
                 # stream_event and once bare.  The bare duplicate carries no
                 # extra information and the SDK can't parse it anyway

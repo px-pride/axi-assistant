@@ -179,9 +179,9 @@ class TuiProtocol:
                         self._emit_text(text)
 
         else:
-            raise ValueError(
-                f"TuiProtocol.emit_forwarded: unhandled message type {msg_type!r}"
-            )
+            # System messages (compacting, compact_boundary, etc.) and other
+            # types are not displayed in the TUI — silently ignore them.
+            pass
 
     def _emit_text(self, text: str) -> None:
         """Route text to the appropriate display mode."""
