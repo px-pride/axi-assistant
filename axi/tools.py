@@ -172,11 +172,11 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
             "is_error": True,
         }
 
-    # Auto-create worktree when cwd is a git repo and another awake agent
+    # Auto-create worktree when cwd is a git repo and another agent
     # already uses the same cwd (prevents concurrent edits to the same tree).
     if not no_worktree and agent_name and worktrees.is_git_repo(agent_cwd):
         cwd_conflict = any(
-            s.cwd == agent_cwd and agents.is_awake(s)
+            s.cwd == agent_cwd
             for name, s in agents.agents.items()
             if name != agent_name
         )
