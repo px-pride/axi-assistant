@@ -80,7 +80,7 @@ def is_git_repo(path: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def create_worktree(name: str) -> str | None:
+def create_worktree(name: str, source_repo: str | None = None) -> str | None:
     """Create a git worktree for an axi-dev agent. Returns worktree path or None on failure."""
     worktree_path = os.path.join(config.BOT_WORKTREES_DIR, name)
 
@@ -94,16 +94,29 @@ def create_worktree(name: str) -> str | None:
         log.warning("Directory exists at %s but is not a git worktree", worktree_path)
         return None
 
+    # Resolve the parent repo: use source_repo if provided, else fall back to BOT_DIR
+    parent_repo = config.BOT_DIR
+    if source_repo:
+        result = subprocess.run(
+            ["git", "-C", source_repo, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            parent_repo = result.stdout.strip()
+        else:
+            log.warning("source_repo '%s' is not a git repo, falling back to BOT_DIR", source_repo)
+
     branch = f"feature/{name}"
     result = subprocess.run(
-        ["git", "-C", config.BOT_DIR, "worktree", "add", worktree_path, "-b", branch],
+        ["git", "-C", parent_repo, "worktree", "add", worktree_path, "-b", branch],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         # Branch might already exist, try without -b
         result = subprocess.run(
-            ["git", "-C", config.BOT_DIR, "worktree", "add", worktree_path, branch],
+            ["git", "-C", parent_repo, "worktree", "add", worktree_path, branch],
             capture_output=True,
             text=True,
         )

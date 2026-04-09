@@ -181,7 +181,7 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
             if name != agent_name
         )
         if cwd_conflict:
-            worktree_path = worktrees.create_worktree(agent_name)
+            worktree_path = worktrees.create_worktree(agent_name, source_repo=agent_cwd)
             if worktree_path:
                 agent_cwd = worktree_path
                 log.info("Auto-created worktree for '%s' at %s (cwd conflict)", agent_name, worktree_path)
