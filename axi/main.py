@@ -287,7 +287,7 @@ async def on_message(message: discord.Message) -> None:
 
     session = agents.agents.get(agent_name)
     if session is None:
-        if channels.killed_category and channel.category_id == channels.killed_category.id:
+        if channels.is_killed_channel(channel):
             await agents.send_system(
                 channel,
                 "This agent has been killed. Ask the master agent to spawn a new one.",
@@ -295,7 +295,7 @@ async def on_message(message: discord.Message) -> None:
         return
 
     # Block killed agents
-    if channels.killed_category and channel.category_id == channels.killed_category.id:
+    if channels.is_killed_channel(channel):
         await agents.send_system(
             channel,
             "This agent has been killed. Use `/spawn` to create a new one.",
@@ -506,9 +506,9 @@ async def _check_idle_agents(now_utc: datetime, master_ch: TextChannel | None) -
         if session.query_lock.locked():
             continue
         ds = discord_state(session)
-        if channels.killed_category and ds.channel_id:
+        if ds.channel_id:
             ch = bot.get_channel(ds.channel_id)
-            if isinstance(ch, TextChannel) and ch.category_id == channels.killed_category.id:
+            if isinstance(ch, TextChannel) and channels.is_killed_channel(ch):
                 continue
         if session.idle_reminder_count >= len(config.IDLE_REMINDER_THRESHOLDS):
             continue
@@ -889,9 +889,9 @@ async def list_agents(interaction: discord.Interaction) -> None:
             status = " [sleeping]"
         is_killed = False
         ds = discord_state(session)
-        if channels.killed_category and ds.channel_id:
+        if ds.channel_id:
             ch = bot.get_channel(ds.channel_id)
-            if isinstance(ch, TextChannel) and ch.category_id == channels.killed_category.id:
+            if isinstance(ch, TextChannel) and channels.is_killed_channel(ch):
                 is_killed = True
         killed_tag = " [killed]" if is_killed else ""
         protected = " [protected]" if name == config.MASTER_AGENT_NAME else ""
@@ -2099,9 +2099,9 @@ async def on_guild_channel_create(channel: discord.abc.GuildChannel) -> None:
     if channel.name == agents.normalize_channel_name(config.MASTER_AGENT_NAME):
         return
 
-    if channels.axi_category and channel.category_id == channels.axi_category.id:
+    if channels.is_axi_channel(channel):
         await _handle_axi_channel_create(channel)
-    elif channels.active_category and channel.category_id == channels.active_category.id:
+    elif channels.is_active_channel(channel):
         await _handle_active_channel_create(channel)
 
     # Ensure master stays at top after any channel creation

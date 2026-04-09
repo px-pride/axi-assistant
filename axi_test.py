@@ -697,11 +697,26 @@ def _find_channel_by_name(client: DiscordClient, guild_id: str, name: str) -> di
 
 
 def _find_killed_category(client: DiscordClient, guild_id: str) -> str | None:
-    """Find the Killed category ID in a guild."""
-    channels: list[dict[str, Any]] = client.get(f"/guilds/{guild_id}/channels")
-    for ch in channels:
-        if ch.get("type") == 4 and ch.get("name", "").lower() == "killed":
-            return ch["id"]
+    """Find a Killed category with room (<50 channels) in a guild.
+
+    Checks primary "Killed" and overflow categories ("Killed 2", etc.).
+    Returns the ID of the first category with room, or None if all are full.
+    """
+    all_channels: list[dict[str, Any]] = client.get(f"/guilds/{guild_id}/channels")
+    killed_cats: list[tuple[int, dict[str, Any]]] = []
+    for ch in all_channels:
+        if ch.get("type") == 4:
+            name = ch.get("name", "")
+            if name.lower() == "killed":
+                killed_cats.append((1, ch))
+            elif re.match(r"^killed\s+\d+$", name.lower()):
+                killed_cats.append((int(name.split()[-1]), ch))
+    killed_cats.sort(key=lambda x: x[0])
+
+    for _, cat in killed_cats:
+        count = sum(1 for c in all_channels if c.get("parent_id") == cat["id"] and c.get("type") == 0)
+        if count < 50:
+            return cat["id"]
     return None
 
 

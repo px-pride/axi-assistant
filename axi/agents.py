@@ -1094,7 +1094,7 @@ def get_master_session() -> AgentSession | None:
 async def reconstruct_agents_from_channels() -> int:
     """Reconstruct sleeping AgentSession entries from existing Discord channels."""
     reconstructed = 0
-    categories = [c for c in (_channels_mod.axi_category, _channels_mod.active_category) if c is not None]
+    categories = _channels_mod.axi_categories + _channels_mod.active_categories
     if not categories:
         return reconstructed
 

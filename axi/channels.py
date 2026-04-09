@@ -35,10 +35,12 @@ _tracer = trace.get_tracer(__name__)
 
 _bot: Bot | None = None
 target_guild: discord.Guild | None = None
-axi_category: CategoryChannel | None = None
-active_category: CategoryChannel | None = None
-killed_category: CategoryChannel | None = None
+axi_categories: list[CategoryChannel] = []
+active_categories: list[CategoryChannel] = []
+killed_categories: list[CategoryChannel] = []
 bot_creating_channels: set[str] = set()
+
+DISCORD_CATEGORY_CHANNEL_LIMIT = 50
 
 # Injected references (set by agents.init → channels.init)
 _agents_dict: dict[str, Any] | None = None
@@ -200,6 +202,54 @@ def _is_axi_cwd(cwd: str | None) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Category group helpers
+# ---------------------------------------------------------------------------
+
+
+def is_killed_channel(channel: TextChannel) -> bool:
+    """Check if a channel is in any Killed category (including overflow)."""
+    return any(channel.category_id == cat.id for cat in killed_categories)
+
+
+def is_axi_channel(channel: TextChannel) -> bool:
+    """Check if a channel is in any Axi category (including overflow)."""
+    return any(channel.category_id == cat.id for cat in axi_categories)
+
+
+def is_active_channel(channel: TextChannel) -> bool:
+    """Check if a channel is in any Active category (including overflow)."""
+    return any(channel.category_id == cat.id for cat in active_categories)
+
+
+async def _get_category_with_room(
+    categories: list[CategoryChannel],
+    base_name: str,
+) -> CategoryChannel:
+    """Return a category from the group with room, creating overflow if needed.
+
+    Scans the list for the first category with < 50 channels. If all are full,
+    creates a new overflow category (e.g. "Killed 2") with the same permissions.
+    """
+    for cat in categories:
+        if len(cat.channels) < DISCORD_CATEGORY_CHANNEL_LIMIT:
+            return cat
+
+    # All full — create overflow
+    next_num = len(categories) + 1
+    overflow_name = f"{base_name} {next_num}"
+    assert target_guild is not None
+    overwrites = _build_category_overwrites(target_guild)
+    cat = await target_guild.create_category(overflow_name, overwrites=overwrites)
+    categories.append(cat)
+    log.info("Created overflow category '%s'", overflow_name)
+
+    # Re-enforce category positions so overflow slots in correctly
+    await ensure_category_positions()
+
+    return cat
+
+
+# ---------------------------------------------------------------------------
 # Guild infrastructure
 # ---------------------------------------------------------------------------
 
@@ -244,9 +294,22 @@ def _build_category_overwrites(
     return overwrites
 
 
-async def ensure_guild_infrastructure() -> tuple[discord.Guild, CategoryChannel, CategoryChannel, CategoryChannel]:
-    """Ensure the guild has Axi, Active, and Killed categories. Called once during on_ready()."""
-    global target_guild, axi_category, active_category, killed_category
+def _match_category_group(cat_name: str, base_name: str) -> int | None:
+    """Match a category name to a base group, returning its sort order.
+
+    Returns 1 for the primary ("Killed"), 2+ for overflow ("Killed 2"), None if no match.
+    """
+    if cat_name == base_name:
+        return 1
+    prefix = base_name + " "
+    if cat_name.startswith(prefix) and cat_name[len(prefix):].isdigit():
+        return int(cat_name[len(prefix):])
+    return None
+
+
+async def ensure_guild_infrastructure() -> None:
+    """Ensure the guild has Axi, Active, and Killed categories (with overflow). Called once during on_ready()."""
+    global target_guild, axi_categories, active_categories, killed_categories
     assert _bot is not None
     _tracer.start_span("ensure_guild_infrastructure", attributes={"discord.guild_id": str(config.DISCORD_GUILD_ID)}).end()
 
@@ -257,17 +320,6 @@ async def ensure_guild_infrastructure() -> tuple[discord.Guild, CategoryChannel,
 
     overwrites = _build_category_overwrites(guild)
 
-    axi_cat = None
-    active_cat = None
-    killed_cat = None
-    for cat in guild.categories:
-        if cat.name == config.AXI_CATEGORY_NAME:
-            axi_cat = cat
-        elif cat.name == config.ACTIVE_CATEGORY_NAME:
-            active_cat = cat
-        elif cat.name == config.KILLED_CATEGORY_NAME:
-            killed_cat = cat
-
     def _overwrites_match(
         existing: dict[discord.Role | discord.Member | discord.Object, discord.PermissionOverwrite],
         desired: dict[discord.Object | discord.Member | discord.Role, discord.PermissionOverwrite],
@@ -276,33 +328,51 @@ async def ensure_guild_infrastructure() -> tuple[discord.Guild, CategoryChannel,
         b = {getattr(k, "id", k): v for k, v in desired.items()}
         return a == b
 
-    for idx, (name, cat) in enumerate([
-        (config.AXI_CATEGORY_NAME, axi_cat),
-        (config.ACTIVE_CATEGORY_NAME, active_cat),
-        (config.KILLED_CATEGORY_NAME, killed_cat),
-    ]):
-        if cat is None:
-            cat = await guild.create_category(name, overwrites=overwrites, position=idx + 1)
-            log.info("Created '%s' category", name)
-        elif not _overwrites_match(cat.overwrites, overwrites):
-            await cat.edit(overwrites=overwrites)
-            log.info("Synced permissions on '%s' category", name)
-        else:
-            log.info("Permissions already current on '%s' category", name)
-        if name == config.AXI_CATEGORY_NAME:
-            axi_cat = cat
-        elif name == config.ACTIVE_CATEGORY_NAME:
-            active_cat = cat
-        else:
-            killed_cat = cat
-    axi_category = axi_cat
-    active_category = active_cat
-    killed_category = killed_cat
+    # Discover all existing categories (primary + overflow) per group
+    # Each entry: (sort_order, CategoryChannel)
+    axi_found: list[tuple[int, CategoryChannel]] = []
+    active_found: list[tuple[int, CategoryChannel]] = []
+    killed_found: list[tuple[int, CategoryChannel]] = []
 
-    assert axi_cat is not None
-    assert active_cat is not None
-    assert killed_cat is not None
-    return guild, axi_cat, active_cat, killed_cat
+    group_map = [
+        (config.AXI_CATEGORY_NAME, axi_found),
+        (config.ACTIVE_CATEGORY_NAME, active_found),
+        (config.KILLED_CATEGORY_NAME, killed_found),
+    ]
+
+    for cat in guild.categories:
+        for base_name, found_list in group_map:
+            order = _match_category_group(cat.name, base_name)
+            if order is not None:
+                found_list.append((order, cat))
+                break
+
+    # Ensure primary exists for each group; sync permissions on all
+    for base_name, found_list in group_map:
+        if not found_list:
+            cat = await guild.create_category(base_name, overwrites=overwrites)
+            found_list.append((1, cat))
+            log.info("Created '%s' category", base_name)
+        else:
+            for _, cat in found_list:
+                if not _overwrites_match(cat.overwrites, overwrites):
+                    await cat.edit(overwrites=overwrites)
+                    log.info("Synced permissions on '%s' category", cat.name)
+                else:
+                    log.info("Permissions already current on '%s' category", cat.name)
+
+    # Sort by order number and store
+    axi_found.sort(key=lambda x: x[0])
+    active_found.sort(key=lambda x: x[0])
+    killed_found.sort(key=lambda x: x[0])
+
+    axi_categories = [cat for _, cat in axi_found]
+    active_categories = [cat for _, cat in active_found]
+    killed_categories = [cat for _, cat in killed_found]
+
+    assert axi_categories
+    assert active_categories
+    assert killed_categories
 
 
 # ---------------------------------------------------------------------------
@@ -314,55 +384,55 @@ async def ensure_agent_channel(agent_name: str, cwd: str | None = None) -> TextC
     """Find or create a text channel for an agent.
 
     Category placement:
-    - axi-master or agents with cwd in BOT_DIR/BOT_WORKTREES_DIR → Axi category
-    - All others → Active category
-    - Channels in Killed are moved to the appropriate target category
-    - Channels in the wrong live category are moved to the correct one
+    - axi-master or agents with cwd in BOT_DIR/BOT_WORKTREES_DIR → Axi categories
+    - All others → Active categories
+    - Channels in Killed are moved to the appropriate target category group
+    - Channels in the wrong live group are moved to the correct one
+    - Uses overflow categories when the primary is full (50-channel limit)
     """
     assert _channel_to_agent is not None
     _tracer.start_span("ensure_agent_channel", attributes={"agent.name": agent_name}).end()
     normalized = normalize_channel_name(agent_name)
 
     is_axi = agent_name == config.MASTER_AGENT_NAME or _is_axi_cwd(cwd)
-    target_category = axi_category if is_axi else active_category
+    target_group = axi_categories if is_axi else active_categories
+    target_base_name = config.AXI_CATEGORY_NAME if is_axi else config.ACTIVE_CATEGORY_NAME
+    target_group_ids = {cat.id for cat in target_group}
 
-    # Search live categories (Axi + Active) for existing channel
-    for cat in (axi_category, active_category):
-        if cat is None:
-            continue
+    # Search live categories (all Axi + all Active) for existing channel
+    for cat in axi_categories + active_categories:
         for ch in cat.text_channels:
             if _match_channel_name(ch.name, normalized):
-                # Move to correct category if it's in the wrong one
-                if target_category and ch.category_id != target_category.id:
+                # Move to correct group if it's in the wrong one
+                if ch.category_id not in target_group_ids:
+                    dest = await _get_category_with_room(target_group, target_base_name)
                     try:
-                        await ch.move(category=target_category, beginning=True, sync_permissions=True)
-                        # move() uses bulk_channel_update which doesn't update local state
-                        ch.category_id = target_category.id
-                        log.info("Moved channel #%s from %s to %s", normalized, cat.name, target_category.name)
+                        await ch.move(category=dest, beginning=True, sync_permissions=True)
+                        ch.category_id = dest.id
+                        log.info("Moved channel #%s from %s to %s", normalized, cat.name, dest.name)
                     except discord.HTTPException as e:
-                        log.warning("Failed to move #%s to %s: %s", normalized, target_category.name, e)
+                        log.warning("Failed to move #%s to %s: %s", normalized, dest.name, e)
                         await _send_to_exceptions(
-                            f"Failed to move #**{normalized}** to {target_category.name}: `{e}`"
+                            f"Failed to move #**{normalized}** to {dest.name}: `{e}`"
                         )
                 _channel_to_agent[ch.id] = agent_name
                 return ch
 
-    # Search Killed category
-    if killed_category:
-        for ch in killed_category.text_channels:
+    # Search all Killed categories
+    for cat in killed_categories:
+        for ch in cat.text_channels:
             if _match_channel_name(ch.name, normalized):
-                target_name = target_category.name if target_category else "?"
+                dest = await _get_category_with_room(target_group, target_base_name)
                 try:
-                    await ch.move(category=target_category, beginning=True, sync_permissions=True)
-                    # move() uses bulk_channel_update which doesn't update local state
-                    ch.category_id = target_category.id
+                    await ch.move(category=dest, beginning=True, sync_permissions=True)
+                    ch.category_id = dest.id
                 except discord.HTTPException as e:
-                    log.warning("Failed to move channel #%s from Killed to %s: %s", normalized, target_name, e)
+                    log.warning("Failed to move channel #%s from Killed to %s: %s", normalized, dest.name, e)
                     await _send_to_exceptions(
-                        f"Failed to move #**{normalized}** from Killed → {target_name}: `{e}`"
+                        f"Failed to move #**{normalized}** from Killed → {dest.name}: `{e}`"
                     )
                 _channel_to_agent[ch.id] = agent_name
-                log.info("Moved channel #%s from Killed to %s", normalized, target_name)
+                log.info("Moved channel #%s from Killed to %s", normalized, dest.name)
                 return ch
 
     # Search uncategorized guild channels (e.g., master pinned to server top)
@@ -372,12 +442,13 @@ async def ensure_agent_channel(agent_name: str, cwd: str | None = None) -> TextC
                 _channel_to_agent[ch.id] = agent_name
                 return ch
 
-    # Create new channel in target category
+    # Create new channel in target category (with overflow awareness)
+    dest = await _get_category_with_room(target_group, target_base_name)
     already_guarded = normalized in bot_creating_channels
     bot_creating_channels.add(normalized)
     try:
         assert target_guild is not None
-        channel = await target_guild.create_text_channel(normalized, category=target_category)
+        channel = await target_guild.create_text_channel(normalized, category=dest)
     except discord.HTTPException as e:
         log.warning("Failed to create channel #%s: %s", normalized, e)
         await _send_to_exceptions(f"Failed to create channel #**{normalized}**: `{e}`")
@@ -386,34 +457,31 @@ async def ensure_agent_channel(agent_name: str, cwd: str | None = None) -> TextC
         if not already_guarded:
             bot_creating_channels.discard(normalized)
     _channel_to_agent[channel.id] = agent_name
-    cat_name = target_category.name if target_category else "?"
-    log.info("Created channel #%s in %s category", normalized, cat_name)
+    log.info("Created channel #%s in %s category", normalized, dest.name)
     return channel
 
 
 async def move_channel_to_killed(agent_name: str) -> None:
-    """Move an agent's channel to the Killed category."""
+    """Move an agent's channel to a Killed category (with overflow)."""
     if agent_name == config.MASTER_AGENT_NAME:
         return
     _tracer.start_span("move_channel_to_killed", attributes={"agent.name": agent_name}).end()
 
     normalized = normalize_channel_name(agent_name)
-    for cat in (axi_category, active_category):
-        if cat is None:
-            continue
+    for cat in axi_categories + active_categories:
         for ch in cat.text_channels:
             if _match_channel_name(ch.name, normalized):
                 try:
+                    dest = await _get_category_with_room(killed_categories, config.KILLED_CATEGORY_NAME)
                     # Strip status prefix when moving to Killed
                     if config.CHANNEL_STATUS_ENABLED and ch.name != normalized:
                         await ch.edit(name=normalized)
-                    await ch.move(category=killed_category, end=True, sync_permissions=True)
-                    # move() uses bulk_channel_update which doesn't update local state
-                    ch.category_id = killed_category.id
-                    log.info("Moved channel #%s to Killed category", normalized)
+                    await ch.move(category=dest, end=True, sync_permissions=True)
+                    ch.category_id = dest.id
+                    log.info("Moved channel #%s to %s", normalized, dest.name)
                 except discord.HTTPException as e:
                     log.warning("Failed to move channel #%s to Killed: %s", normalized, e)
-                    await _send_to_exceptions(f"Failed to move #**{normalized}** to Killed category: `{e}`")
+                    await _send_to_exceptions(f"Failed to move #**{normalized}** to Killed: `{e}`")
                 return
 
 
@@ -429,9 +497,7 @@ async def get_agent_channel(agent_name: str) -> TextChannel | None:
             if isinstance(ch, TextChannel):
                 return ch
     normalized = normalize_channel_name(agent_name)
-    for cat in (axi_category, active_category):
-        if cat is None:
-            continue
+    for cat in axi_categories + active_categories:
         for ch in cat.text_channels:
             if _match_channel_name(ch.name, normalized):
                 return ch
@@ -446,9 +512,7 @@ async def deduplicate_master_channel() -> None:
     normalized = normalize_channel_name(config.MASTER_AGENT_NAME)
     seen_ids: set[int] = set()
     master_channels: list[TextChannel] = []
-    for cat in (axi_category, active_category, killed_category):
-        if cat is None:
-            continue
+    for cat in axi_categories + active_categories + killed_categories:
         for ch in cat.text_channels:
             if _match_channel_name(ch.name, normalized) and ch.id not in seen_ids:
                 master_channels.append(ch)
@@ -464,14 +528,15 @@ async def deduplicate_master_channel() -> None:
         return
 
     # Prefer the uncategorized one at the top, then one in Axi category
+    axi_cat_ids = {cat.id for cat in axi_categories}
     keep: TextChannel | None = None
     for ch in master_channels:
         if ch.category is None:
             keep = ch
             break
-    if keep is None and axi_category:
+    if keep is None and axi_categories:
         for ch in master_channels:
-            if ch.category_id == axi_category.id:
+            if ch.category_id in axi_cat_ids:
                 keep = ch
                 break
     if keep is None:
@@ -533,7 +598,7 @@ async def ensure_master_channel_position() -> None:
 _category_positions_cooldown: float = 0.0
 
 async def ensure_category_positions() -> None:
-    """Ensure Axi/Active/Killed categories are ordered: positions 1, 2, 3.
+    """Ensure category groups are ordered: Axi..., Active..., Killed... (with overflow).
 
     Position 0 is reserved for #axi-master (uncategorized).
     Uses the same PATCH /guilds/{guild_id}/channels bulk-update pattern.
@@ -549,16 +614,13 @@ async def ensure_category_positions() -> None:
         return
     _category_positions_cooldown = now
 
-    # Always send all 3 positions in one PATCH — discord.py cache may be stale
-    # when on_guild_channel_update fires, so checking cat.position is unreliable.
+    # Build position list: Axi, Axi 2, ..., Active, Active 2, ..., Killed, Killed 2, ...
     updates = []
-    for cat, desired_pos in [
-        (axi_category, 1),
-        (active_category, 2),
-        (killed_category, 3),
-    ]:
-        if cat is not None:
-            updates.append({"id": str(cat.id), "position": desired_pos})
+    pos = 1
+    for group in (axi_categories, active_categories, killed_categories):
+        for cat in group:
+            updates.append({"id": str(cat.id), "position": pos})
+            pos += 1
 
     if not updates:
         return
@@ -633,9 +695,7 @@ async def _do_reorder() -> None:
     assert target_guild is not None
     master_normalized = normalize_channel_name(config.MASTER_AGENT_NAME)
 
-    for category in (axi_category, active_category):
-        if category is None:
-            continue
+    for category in axi_categories + active_categories:
         text_channels = list(category.text_channels)
         if len(text_channels) <= 1:
             continue
@@ -803,7 +863,7 @@ async def _do_rename_batch() -> None:
             channel = _bot.get_channel(ds.channel_id) if _bot else None
             if not isinstance(channel, TextChannel):
                 continue
-            if killed_category and channel.category_id == killed_category.id:
+            if is_killed_channel(channel):
                 continue
 
             status = compute_agent_status(session)
