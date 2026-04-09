@@ -508,7 +508,7 @@ wheels = [
 [[package]]
 name = "flowcoder-engine"
 version = "0.1.0"
-source = { git = "https://github.com/px-pride/flowcoder.git?subdirectory=packages%2Fflowcoder-engine&rev=40972aa#40972aa55058a560d55d8737e65e61bb98fccf53" }
+source = { git = "https://github.com/px-pride/flowcoder.git?subdirectory=packages%2Fflowcoder-engine&rev=4c78849#4c788499d6a8c3dfb473cbc66c7047acbc845193" }
 dependencies = [
     { name = "flowcoder-flowchart" },
     { name = "opentelemetry-api" },
@@ -517,7 +517,7 @@ dependencies = [
 [[package]]
 name = "flowcoder-flowchart"
 version = "0.1.0"
-source = { git = "https://github.com/px-pride/flowcoder.git?subdirectory=packages%2Fflowcoder-flowchart#42b5fc2181e67bf4507fce3e2dfa25ca1e645429" }
+source = { git = "https://github.com/px-pride/flowcoder.git?subdirectory=packages%2Fflowcoder-flowchart&rev=4c78849#4c788499d6a8c3dfb473cbc66c7047acbc845193" }
 dependencies = [
     { name = "pydantic" },
 ]
@@ -1180,8 +1180,8 @@ requires-dist = [
     { name = "discord-py" },
     { name = "discordquery", editable = "packages/discordquery" },
     { name = "fastapi", specifier = ">=0.115" },
-    { name = "flowcoder-engine", git = "https://github.com/px-pride/flowcoder.git?subdirectory=packages%2Fflowcoder-engine&rev=40972aa" },
-    { name = "flowcoder-flowchart", git = "https://github.com/px-pride/flowcoder.git?subdirectory=packages%2Fflowcoder-flowchart" },
+    { name = "flowcoder-engine", git = "https://github.com/px-pride/flowcoder.git?subdirectory=packages%2Fflowcoder-engine&rev=4c78849" },
+    { name = "flowcoder-flowchart", git = "https://github.com/px-pride/flowcoder.git?subdirectory=packages%2Fflowcoder-flowchart&rev=4c78849" },
     { name = "flowcoder-tui", editable = "packages/flowcoder_tui" },
     { name = "httpx" },
     { name = "opentelemetry-api", specifier = ">=1.20" },
