@@ -159,66 +159,67 @@ def discord_search_messages(
     guild_id: str,
     query: str,
     channel_id: str | None = None,
-    author: str | None = None,
+    author_id: str | None = None,
     limit: int = 25,
+    sort_by: str = "timestamp",
+    sort_order: str = "desc",
 ) -> str:
-    """Search messages across a Discord guild by content substring. Case-insensitive.
-    Scans recent history (up to 500 messages per channel), not a full-text index.
+    """Search messages across a Discord guild using Discord's native full-text search.
+    Searches the entire guild history, not just recent messages.
 
     Args:
         guild_id: The Discord guild (server) ID to search
-        query: Search term (case-insensitive substring match)
+        query: Search text (Discord full-text search)
         channel_id: Limit search to this channel (ID or guild_id:channel_name, optional)
-        author: Filter by author username (case-insensitive substring, optional)
+        author_id: Filter by author user ID (optional)
         limit: Max results to return (default 25, max 100)
+        sort_by: Sort by "timestamp" or "relevance" (default "timestamp")
+        sort_order: Sort order "asc" or "desc" (default "desc")
     """
-    query_lower = query.lower()
     limit = min(limit, 100)
-    author_lower = author.lower() if author else None
-    max_scan = 500
 
+    params: dict[str, Any] = {"content": query}
     if channel_id:
-        channel_ids = [_resolve_channel(channel_id)]
-    else:
-        channels_list = _client.list_channels(guild_id)
-        channel_ids = [ch["id"] for ch in channels_list]
+        params["channel_id"] = _resolve_channel(channel_id)
+    if author_id:
+        params["author_id"] = author_id
+    if sort_by:
+        params["sort_by"] = sort_by
+    if sort_order:
+        params["sort_order"] = sort_order
 
-    found = 0
     results: list[str] = []
-    for ch_id in channel_ids:
-        if found >= limit:
+    offset = 0
+
+    while len(results) < limit:
+        page_size = min(25, limit - len(results))
+        params["limit"] = page_size
+        params["offset"] = offset
+
+        data = _client.get(f"/guilds/{guild_id}/messages/search", params)
+
+        message_groups = data.get("messages", [])
+        if not message_groups:
             break
-        scanned = 0
-        params: dict[str, Any] = {}
-        while scanned < max_scan and found < limit:
-            batch_size = min(100, max_scan - scanned)
-            try:
-                batch = _client.get_messages(ch_id, limit=batch_size, **params)
-            except Exception:
-                break
-            if not batch:
-                break
-            for msg in batch:
-                msg_content = msg.get("content", "").lower()
-                author_name = msg.get("author", {}).get("username", "").lower()
-                if query_lower in msg_content:
-                    if author_lower and author_lower not in author_name:
-                        continue
+
+        for group in message_groups:
+            for msg in group:
+                if msg.get("hit"):
                     ts = msg.get("timestamp", "")
-                    results.append(
-                        f"[{ts}] #{ch_id} {msg.get('author', {}).get('username', 'unknown')}: {msg.get('content', '')}"
-                    )
-                    found += 1
-                    if found >= limit:
-                        break
-            scanned += len(batch)
-            if len(batch) < batch_size:
-                break
-            params["before"] = batch[-1]["id"]
+                    ch_id = msg.get("channel_id", "")
+                    author = msg.get("author", {}).get("username", "unknown")
+                    content = msg.get("content", "")
+                    results.append(f"[{ts}] #{ch_id} {author}: {content}")
+                    break
+
+        total = data.get("total_results", 0)
+        offset += page_size
+        if offset >= total or offset >= 9975:
+            break
 
     if not results:
         return "No messages found."
-    return "\n".join(results)
+    return "\n".join(results[:limit])
 
 
 if __name__ == "__main__":
