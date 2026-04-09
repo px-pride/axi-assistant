@@ -47,7 +47,8 @@ from axi.schedule_tools import make_schedule_mcp_server
 async def _resolve_channel(channel_arg: str) -> str:
     """Resolve a channel argument to a channel ID.
 
-    Accepts a raw channel ID or guild_id:channel_name (e.g. '123456789:general').
+    Accepts a raw channel ID, guild_id:channel_name (e.g. '123456789:general'),
+    or a bare channel name (resolved against the bot's home guild).
     """
     if channel_arg.isdigit():
         return channel_arg
@@ -58,7 +59,11 @@ async def _resolve_channel(channel_arg: str) -> str:
             if ch:
                 return str(ch["id"])
             raise ValueError(f"No text channel named '{channel_name}' in guild {guild_id_str}")
-    raise ValueError(f"'{channel_arg}' is not a valid channel ID or guild_id:channel_name pair")
+    # Bare channel name — resolve against the bot's home guild
+    ch = await config.discord_client.find_channel(config.DISCORD_GUILD_ID, channel_arg)
+    if ch:
+        return str(ch["id"])
+    raise ValueError(f"'{channel_arg}' is not a valid channel ID, guild_id:channel_name pair, or channel name in the home guild")
 
 if TYPE_CHECKING:
     from axi.axi_types import McpArgs, McpResult
@@ -582,13 +587,13 @@ async def discord_list_guilds(args: McpArgs) -> McpResult:
     {
         "type": "object",
         "properties": {
-            "guild_id": {"type": "string", "description": "The Discord guild (server) ID"},
+            "guild_id": {"type": "string", "description": "The Discord guild (server) ID. Defaults to the bot's home guild if omitted."},
         },
-        "required": ["guild_id"],
+        "required": [],
     },
 )
 async def discord_list_channels(args: McpArgs) -> McpResult:
-    guild_id = args["guild_id"]
+    guild_id = args.get("guild_id") or str(config.DISCORD_GUILD_ID)
     _tracer.start_span("tool.discord_list_channels", attributes={"discord.guild_id": guild_id}).end()
     try:
         text_channels = await config.discord_client.list_channels(guild_id)
@@ -712,17 +717,17 @@ async def discord_send_message(args: McpArgs) -> McpResult:
     {
         "type": "object",
         "properties": {
-            "guild_id": {"type": "string", "description": "The Discord guild (server) ID to search"},
+            "guild_id": {"type": "string", "description": "The Discord guild (server) ID to search. Defaults to the bot's home guild if omitted."},
             "query": {"type": "string", "description": "Search term (case-insensitive substring match)"},
             "channel_id": {"type": "string", "description": "Limit search to this channel (ID or guild_id:channel_name, optional)"},
             "author": {"type": "string", "description": "Filter by author username (case-insensitive substring, optional)"},
             "limit": {"type": "integer", "description": "Max results to return (default 25, max 100)"},
         },
-        "required": ["guild_id", "query"],
+        "required": ["query"],
     },
 )
 async def discord_search_messages(args: McpArgs) -> McpResult:
-    guild_id = args["guild_id"]
+    guild_id = args.get("guild_id") or str(config.DISCORD_GUILD_ID)
     query = args["query"].lower()
     limit = min(args.get("limit", 25), 100)
     channel_filter_raw = args.get("channel_id")

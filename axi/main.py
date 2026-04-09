@@ -2023,6 +2023,8 @@ def _register_agent_from_channel(channel: TextChannel, cwd: str) -> None:
             session.system_prompt["append"]
             .replace("{channel_id}", str(channel.id))
             .replace("{channel_name}", channel.name)
+            .replace("{guild_id}", str(channel.guild.id))
+            .replace("{guild_name}", channel.guild.name)
         )
     agents.agents[agent_name] = session
     agents.channel_to_agent[channel.id] = agent_name
@@ -2305,6 +2307,8 @@ async def _setup_guild_infrastructure(master_session: AgentSession) -> None:
                 master_session.system_prompt["append"]
                 .replace("{channel_id}", str(master_channel.id))
                 .replace("{channel_name}", master_channel.name)
+                .replace("{guild_id}", str(master_channel.guild.id))
+                .replace("{guild_name}", master_channel.guild.name)
             )
         agents.channel_to_agent[master_channel.id] = config.MASTER_AGENT_NAME
         log.info("Guild infrastructure ready (guild=%s, master_channel=#%s)", config.DISCORD_GUILD_ID, master_channel.name)

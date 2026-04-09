@@ -1140,6 +1140,8 @@ async def reconstruct_agents_from_channels() -> int:
                     session.system_prompt["append"]
                     .replace("{channel_id}", str(ch.id))
                     .replace("{channel_name}", ch.name)
+                    .replace("{guild_id}", str(ch.guild.id))
+                    .replace("{guild_name}", ch.guild.name)
                 )
             agents[agent_name] = session
             channel_to_agent[ch.id] = agent_name
@@ -1505,6 +1507,8 @@ async def spawn_agent(
                 session.system_prompt["append"]
                 .replace("{channel_id}", str(channel.id))
                 .replace("{channel_name}", channel.name)
+                .replace("{guild_id}", str(channel.guild.id))
+                .replace("{guild_name}", channel.guild.name)
             )
 
         agents[name] = session
