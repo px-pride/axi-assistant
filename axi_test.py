@@ -34,6 +34,7 @@ from axi.worktrees import (
     find_git_deps as _find_git_deps,
     find_main_repo as _find_main_repo,
     flock as _flock,
+    get_default_branch as _get_default_branch,
     get_worktree_branch,
     git as _git,
     merge_lock_file as _merge_lock_file,
@@ -921,7 +922,8 @@ def cmd_merge(args: argparse.Namespace) -> None:
             time.sleep(2)
 
         # Execute merge
-        print(f"Merging {branch} into main...")
+        default_branch = _get_default_branch(main_repo)
+        print(f"Merging {branch} into {default_branch}...")
         message = getattr(args, "message", None)
 
         with _flock(_merge_lock_file(main_repo)):
@@ -933,7 +935,7 @@ def cmd_merge(args: argparse.Namespace) -> None:
             print(f"Squash-merged as {detail}: {branch}")
             _upgrade_git_deps(main_repo)
         elif status == "needs_rebase":
-            print(f"Error: main has moved ahead — rebase '{branch}' onto main and resubmit", file=sys.stderr)
+            print(f"Error: {default_branch} has moved ahead — rebase '{branch}' onto {default_branch} and resubmit", file=sys.stderr)
             sys.exit(1)
         else:
             print(f"Error: {detail}", file=sys.stderr)
@@ -1075,9 +1077,10 @@ def cmd_clean(args: argparse.Namespace) -> None:
 
     # 5. Delete branch if it was a feature branch (unless --keep-branch)
     if not args.keep_branch and branch and branch.startswith("feature/"):
-        # Check if branch is merged into main
+        # Check if branch is merged into the default branch
+        default_branch = _get_default_branch(main_repo)
         result = subprocess.run(
-            ["git", "-C", main_repo, "branch", "--merged", "main"],
+            ["git", "-C", main_repo, "branch", "--merged", default_branch],
             capture_output=True,
             text=True,
         )

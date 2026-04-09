@@ -65,6 +65,19 @@ def get_worktree_branch(worktree_path: str) -> str:
     return result.stdout.strip() or "unknown"
 
 
+def get_default_branch(repo_path: str) -> str:
+    """Detect the default branch name (main or master) for a repo."""
+    for candidate in ("main", "master"):
+        result = subprocess.run(
+            ["git", "-C", repo_path, "rev-parse", "--verify", f"refs/heads/{candidate}"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return candidate
+    return "main"  # fallback
+
+
 def is_git_repo(path: str) -> bool:
     """Check if *path* is inside a git working tree."""
     result = subprocess.run(
@@ -282,10 +295,13 @@ def execute_merge(main_repo: str, branch: str, message: str | None = None) -> tu
     status: "merged", "needs_rebase", or "error"
     detail: commit SHA on success, or error message on failure.
     """
-    # Verify main repo is on 'main' branch
+    # Detect default branch (main or master)
+    default_branch = get_default_branch(main_repo)
+
+    # Verify main repo is on the default branch
     current = git(main_repo, "branch", "--show-current")
-    if current.stdout.strip() != "main":
-        return ("error", f"main repo is on branch '{current.stdout.strip()}', expected 'main'")
+    if current.stdout.strip() != default_branch:
+        return ("error", f"main repo is on branch '{current.stdout.strip()}', expected '{default_branch}'")
 
     # Pre-merge cleanup: if index is dirty from interrupted merge, reset
     if git(main_repo, "diff", "--cached", "--quiet").returncode != 0:
@@ -294,28 +310,28 @@ def execute_merge(main_repo: str, branch: str, message: str | None = None) -> tu
         if r.returncode != 0:
             return ("error", f"failed to clean dirty index: {r.stderr.strip()}")
 
-    # Fast-forward check: merge-base must equal main HEAD
-    merge_base_r = git(main_repo, "merge-base", "main", branch)
+    # Fast-forward check: merge-base must equal default branch HEAD
+    merge_base_r = git(main_repo, "merge-base", default_branch, branch)
     if merge_base_r.returncode != 0:
         return ("error", f"failed to compute merge-base: {merge_base_r.stderr.strip()}")
 
-    main_head_r = git(main_repo, "rev-parse", "main")
+    main_head_r = git(main_repo, "rev-parse", default_branch)
     if main_head_r.returncode != 0:
-        return ("error", f"failed to get main HEAD: {main_head_r.stderr.strip()}")
+        return ("error", f"failed to get {default_branch} HEAD: {main_head_r.stderr.strip()}")
 
     merge_base = merge_base_r.stdout.strip()
     main_head = main_head_r.stdout.strip()
 
     if merge_base != main_head:
-        return ("needs_rebase", f"merge-base {merge_base[:8]} != main HEAD {main_head[:8]}")
+        return ("needs_rebase", f"merge-base {merge_base[:8]} != {default_branch} HEAD {main_head[:8]}")
 
-    # Check branch has commits beyond main
-    log_r = git(main_repo, "log", "--oneline", f"main..{branch}")
+    # Check branch has commits beyond default branch
+    log_r = git(main_repo, "log", "--oneline", f"{default_branch}..{branch}")
     if not log_r.stdout.strip():
-        return ("error", "no commits to merge — branch is identical to main")
+        return ("error", f"no commits to merge — branch is identical to {default_branch}")
 
     # Collect full commit messages (subject + body) before squashing
-    msg_r = git(main_repo, "log", "--format=%B---", f"main..{branch}")
+    msg_r = git(main_repo, "log", "--format=%B---", f"{default_branch}..{branch}")
     raw_msgs = msg_r.stdout.strip()
     # Split by separator, clean up, format as bullet list
     commits = [m.strip() for m in raw_msgs.split("---") if m.strip()]
@@ -364,13 +380,14 @@ def is_auto_worktree(cwd: str) -> bool:
         return False
 
 
-def has_commits_beyond_main(worktree_path: str) -> bool:
-    """Check if the worktree branch has commits beyond main."""
+def has_commits_beyond_default(worktree_path: str) -> bool:
+    """Check if the worktree branch has commits beyond the default branch."""
     branch = get_worktree_branch(worktree_path)
     if not branch or branch == "unknown":
         return False
+    default_branch = get_default_branch(worktree_path)
     result = subprocess.run(
-        ["git", "-C", worktree_path, "log", "--oneline", f"main..{branch}"],
+        ["git", "-C", worktree_path, "log", "--oneline", f"{default_branch}..{branch}"],
         capture_output=True,
         text=True,
     )
@@ -402,7 +419,7 @@ def try_merge_and_cleanup(worktree_path: str) -> tuple[str, str]:
     main_repo = os.path.dirname(result.stdout.strip())
 
     # Check for commits
-    if not has_commits_beyond_main(worktree_path):
+    if not has_commits_beyond_default(worktree_path):
         _remove_worktree(main_repo, worktree_path, branch)
         return ("no_commits", "no new commits — cleaned up worktree")
 
@@ -416,8 +433,9 @@ def try_merge_and_cleanup(worktree_path: str) -> tuple[str, str]:
 
     if status == "needs_rebase":
         # Attempt auto-rebase
+        default_branch = get_default_branch(main_repo)
         rebase_r = subprocess.run(
-            ["git", "-C", worktree_path, "rebase", "main"],
+            ["git", "-C", worktree_path, "rebase", default_branch],
             capture_output=True,
             text=True,
         )
