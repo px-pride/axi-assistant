@@ -27,6 +27,34 @@ from opentelemetry import trace
 from axi import agents, channels, config, worktrees
 from axi.log_context import set_agent_context, set_trigger
 
+# Max byte size for MCP tool text results.  The Claude CLI hangs when a single
+# MCP result exceeds the 64 KB Linux pipe buffer default.  50 KB leaves margin.
+_MCP_TEXT_MAX_BYTES = 50 * 1024
+
+
+def _truncate_mcp_text(text: str, total_messages: int) -> str:
+    """Truncate MCP result text to stay under the pipe-buffer-safe limit.
+
+    Cuts from the *oldest* (top) end so the most recent messages survive,
+    and prepends a notice telling the model to paginate for the rest.
+    """
+    encoded = text.encode()
+    if len(encoded) <= _MCP_TEXT_MAX_BYTES:
+        return text
+    # Reserve space for the notice header (max ~120 bytes).
+    body_budget = _MCP_TEXT_MAX_BYTES - 256
+    # Keep the tail (newest messages).  Decode with replace to avoid
+    # splitting mid-codepoint.
+    kept = encoded[-body_budget:].decode("utf-8", errors="replace")
+    # Snap to the first complete line
+    newline = kept.find("\n")
+    if newline != -1:
+        kept = kept[newline + 1:]
+    kept_lines = kept.count("\n") + 1
+    dropped = total_messages - kept_lines
+    notice = f"[Truncated: showing {kept_lines} of {total_messages} messages. Use 'before' parameter to paginate for older messages.]\n"
+    return notice + kept
+
 # Discord snowflake epoch (2015-01-01T00:00:00Z in milliseconds)
 _DISCORD_EPOCH_MS = 1420070400000
 
@@ -622,7 +650,7 @@ async def discord_list_channels(args: McpArgs) -> McpResult:
     },
 )
 async def discord_read_messages(args: McpArgs) -> McpResult:
-    limit = min(args.get("limit", 20), 500)
+    limit = min(args.get("limit", 20), 200)
     before_raw = args.get("before")
     after_raw = args.get("after")
     try:
@@ -661,7 +689,9 @@ async def discord_read_messages(args: McpArgs) -> McpResult:
             content = msg.get("content", "")
             timestamp = msg.get("timestamp", "")
             formatted.append(f"[{timestamp}] {author}: {content}")
-        return {"content": [{"type": "text", "text": "\n".join(formatted)}]}
+        text = "\n".join(formatted)
+        text = _truncate_mcp_text(text, len(all_messages))
+        return {"content": [{"type": "text", "text": text}]}
     except ValueError as e:
         return {"content": [{"type": "text", "text": f"Error parsing before/after: {e}"}], "is_error": True}
     except Exception as e:
@@ -757,7 +787,9 @@ async def discord_search_messages(args: McpArgs) -> McpResult:
                 params["before"] = batch[-1]["id"]
         if not results:
             return {"content": [{"type": "text", "text": "No messages found."}]}
-        return {"content": [{"type": "text", "text": "\n".join(results)}]}
+        text = "\n".join(results)
+        text = _truncate_mcp_text(text, len(results))
+        return {"content": [{"type": "text", "text": text}]}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
 
@@ -897,6 +929,53 @@ async def clear_channel_status(args: McpArgs) -> McpResult:
     return {"content": [{"type": "text", "text": "Custom status cleared. Channel will revert to auto-detected status."}]}
 
 
+@tool(
+    "discord_toggle_plan_mode",
+    "Toggle plan mode on an agent. When plan mode is ON, the agent plans "
+    "before implementing. When OFF, the agent executes normally. "
+    "Returns the new plan mode state.",
+    {
+        "type": "object",
+        "properties": {
+            "agent_name": {
+                "type": "string",
+                "description": "Name of the agent to toggle plan mode on",
+            },
+        },
+        "required": ["agent_name"],
+    },
+)
+async def discord_toggle_plan_mode(args: McpArgs) -> McpResult:
+    agent_name = args.get("agent_name", "").strip()
+    _tracer.start_span("tool.discord_toggle_plan_mode", attributes={"agent.name": agent_name}).end()
+
+    if not agent_name:
+        return {"content": [{"type": "text", "text": "Error: agent_name is required."}], "is_error": True}
+
+    session = agents.agents.get(agent_name)
+    if session is None:
+        return {"content": [{"type": "text", "text": f"Error: agent '{agent_name}' not found."}], "is_error": True}
+
+    new_mode = not session.plan_mode
+    session.plan_mode = new_mode
+
+    if session.client is not None:
+        try:
+            mode_str = "plan" if new_mode else "default"
+            await session.client.set_permission_mode(mode_str)
+            log.info("Agent '%s' permission mode set to '%s'", agent_name, mode_str)
+        except Exception as e:
+            log.exception("Failed to set permission mode for '%s'", agent_name)
+            session.plan_mode = not new_mode
+            return {
+                "content": [{"type": "text", "text": f"Error: failed to set plan mode for '{agent_name}': {e}"}],
+                "is_error": True,
+            }
+
+    state = "ON" if new_mode else "OFF"
+    return {"content": [{"type": "text", "text": f"Plan mode {state} for '{agent_name}'."}]}
+
+
 # ---------------------------------------------------------------------------
 # MCP server assembly
 # ---------------------------------------------------------------------------
@@ -905,7 +984,7 @@ async def clear_channel_status(args: McpArgs) -> McpResult:
 utils_mcp_server = create_sdk_mcp_server(
     name="utils",
     version="1.0.0",
-    tools=[get_date_and_time, discord_send_file, set_channel_status, clear_channel_status],
+    tools=[get_date_and_time, discord_send_file, set_channel_status, clear_channel_status, discord_toggle_plan_mode],
 )
 
 # Spawned agents get spawn+kill+restart-agent (no bot restart — they tell the parent)

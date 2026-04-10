@@ -812,6 +812,35 @@ async def _handle_system_message(
 
 
 # ---------------------------------------------------------------------------
+# Stall watchdog
+# ---------------------------------------------------------------------------
+
+_STALL_WARN_SECS = 300  # 5 minutes — log a warning
+
+
+async def _stall_watchdog(
+    session_name: str,
+    t_last_event: list[float],
+    done: asyncio.Event,
+) -> None:
+    """Background task that logs warnings when the stream stalls."""
+    while not done.is_set():
+        try:
+            await asyncio.wait_for(done.wait(), timeout=_STALL_WARN_SECS)
+            return  # stream finished normally
+        except asyncio.TimeoutError:
+            pass
+        elapsed = time.monotonic() - t_last_event[0]
+        if elapsed >= _STALL_WARN_SECS:
+            log.warning(
+                "Stream stall for '%s': no event in %dm%02ds",
+                session_name,
+                int(elapsed) // 60,
+                int(elapsed) % 60,
+            )
+
+
+# ---------------------------------------------------------------------------
 # Main streaming entrypoint
 # ---------------------------------------------------------------------------
 
@@ -834,8 +863,14 @@ async def stream_response_to_channel(session: AgentSession, channel: TextChannel
     live_edit = _LiveEditState(channel.id) if config.STREAMING_DISCORD else None
     ctx = _StreamCtx(live_edit=live_edit)
 
+    # Stall watchdog — logs warnings when no stream events arrive for 5+ min
+    t_last_event_ref = [time.monotonic()]
+    stall_done = asyncio.Event()
+    watchdog = asyncio.create_task(_stall_watchdog(session.name, t_last_event_ref, stall_done))
+
     async with channel.typing() as typing_ctx:
         async for msg in _receive_response_safe(session):
+            t_last_event_ref[0] = time.monotonic()
             if t_first_event is None:
                 t_first_event = time.monotonic()
             ctx.msg_total += 1
@@ -875,6 +910,10 @@ async def stream_response_to_channel(session: AgentSession, channel: TextChannel
                 ctx.text_buffer = ctx.text_buffer[:split_at]
                 await _flush_text(ctx, session, channel, "mid_turn_split")
                 ctx.text_buffer = remainder
+
+    # Stop the stall watchdog now that the stream is done
+    stall_done.set()
+    watchdog.cancel()
 
     # Post-loop stderr drain — catch anything emitted during final processing
     await _drain_and_send_stderr(session, channel)

@@ -9,6 +9,7 @@ sessions, or any semantic layer.
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import logging
 import os
@@ -252,6 +253,16 @@ class ProcmuxServer:
         except Exception as e:
             await self._send_result(ResultMsg(ok=False, name=name, error=str(e)))
             return
+
+        # Increase stdin pipe buffer to 1 MB to prevent hangs when sending
+        # large MCP results (default Linux pipe buffer is 64 KB).
+        if proc.stdin and hasattr(proc.stdin, "transport"):
+            try:
+                pipe = proc.stdin.transport.get_extra_info("pipe")
+                if pipe is not None:
+                    fcntl.fcntl(pipe.fileno(), fcntl.F_SETPIPE_SZ, 1024 * 1024)
+            except (OSError, AttributeError) as exc:
+                log.debug("Could not increase stdin pipe buffer for '%s': %s", name, exc)
 
         mp = ManagedProcess(name=name, proc=proc)
         mp.stdout_task = asyncio.create_task(self._relay_stdout(mp))
