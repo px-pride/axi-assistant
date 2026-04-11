@@ -1,0 +1,116 @@
+#!/bin/bash
+# systemctl wrapper: translates --user operations to busctl D-Bus calls.
+#
+# Inside the Claude Code sandbox, systemctl --user fails because it connects
+# to /run/user/<uid>/systemd/private (auth fails with empty caps/NoNewPrivs).
+# But D-Bus access to org.freedesktop.systemd1 works perfectly via busctl.
+# This wrapper intercepts --user calls and routes them through D-Bus.
+#
+# Non-user calls fall through to /usr/bin/systemctl.
+set -euo pipefail
+
+REAL_SYSTEMCTL=/usr/bin/systemctl
+DEST=org.freedesktop.systemd1
+PATH_PREFIX=/org/freedesktop/systemd1
+MGR="$DEST.Manager"
+
+# Check if --user is in the args
+USER_MODE=false
+ARGS=()
+for arg in "$@"; do
+    if [[ "$arg" == "--user" ]]; then
+        USER_MODE=true
+    else
+        ARGS+=("$arg")
+    fi
+done
+
+# Non-user mode: pass through to real systemctl
+if ! $USER_MODE; then
+    exec "$REAL_SYSTEMCTL" "$@"
+fi
+
+# Try real systemctl first — if it works, prefer it (more complete output)
+if "$REAL_SYSTEMCTL" --user "${ARGS[@]}" 2>/dev/null; then
+    exit 0
+fi
+
+# Real systemctl failed — fall back to busctl D-Bus translation
+SUBCMD="${ARGS[0]:-}"
+UNIT="${ARGS[1]:-}"
+
+case "$SUBCMD" in
+    start)
+        [[ -z "$UNIT" ]] && { echo "Usage: systemctl --user start <unit>" >&2; exit 1; }
+        busctl --user call "$DEST" "$PATH_PREFIX" "$MGR" StartUnit ss "$UNIT" "replace" >/dev/null
+        echo "Started $UNIT"
+        ;;
+    stop)
+        [[ -z "$UNIT" ]] && { echo "Usage: systemctl --user stop <unit>" >&2; exit 1; }
+        busctl --user call "$DEST" "$PATH_PREFIX" "$MGR" StopUnit ss "$UNIT" "replace" >/dev/null
+        echo "Stopped $UNIT"
+        ;;
+    restart)
+        [[ -z "$UNIT" ]] && { echo "Usage: systemctl --user restart <unit>" >&2; exit 1; }
+        busctl --user call "$DEST" "$PATH_PREFIX" "$MGR" RestartUnit ss "$UNIT" "replace" >/dev/null
+        echo "Restarted $UNIT"
+        ;;
+    reload)
+        [[ -z "$UNIT" ]] && { echo "Usage: systemctl --user reload <unit>" >&2; exit 1; }
+        busctl --user call "$DEST" "$PATH_PREFIX" "$MGR" ReloadUnit ss "$UNIT" "replace" >/dev/null
+        echo "Reloaded $UNIT"
+        ;;
+    daemon-reload)
+        busctl --user call "$DEST" "$PATH_PREFIX" "$MGR" Reload >/dev/null
+        echo "Daemon reloaded"
+        ;;
+    is-active)
+        [[ -z "$UNIT" ]] && { echo "Usage: systemctl --user is-active <unit>" >&2; exit 1; }
+        # Escape unit name for D-Bus path: replace - with _2d, . with _2e, @ with _40
+        ESCAPED=$(echo "$UNIT" | sed 's/-/_2d/g; s/\./_2e/g; s/@/_40/g')
+        STATE=$(busctl --user get-property "$DEST" "$PATH_PREFIX/unit/$ESCAPED" org.freedesktop.systemd1.Unit ActiveState 2>/dev/null | sed 's/^s "\(.*\)"$/\1/')
+        echo "$STATE"
+        [[ "$STATE" == "active" ]]
+        ;;
+    is-enabled)
+        [[ -z "$UNIT" ]] && { echo "Usage: systemctl --user is-enabled <unit>" >&2; exit 1; }
+        ESCAPED=$(echo "$UNIT" | sed 's/-/_2d/g; s/\./_2e/g; s/@/_40/g')
+        STATE=$(busctl --user get-property "$DEST" "$PATH_PREFIX/unit/$ESCAPED" org.freedesktop.systemd1.Unit UnitFileState 2>/dev/null | sed 's/^s "\(.*\)"$/\1/')
+        echo "$STATE"
+        [[ "$STATE" == "enabled" || "$STATE" == "static" ]]
+        ;;
+    enable)
+        [[ -z "$UNIT" ]] && { echo "Usage: systemctl --user enable <unit>" >&2; exit 1; }
+        busctl --user call "$DEST" "$PATH_PREFIX" "$MGR" EnableUnitFiles asbb 1 "$UNIT" false false >/dev/null
+        echo "Enabled $UNIT"
+        ;;
+    disable)
+        [[ -z "$UNIT" ]] && { echo "Usage: systemctl --user disable <unit>" >&2; exit 1; }
+        busctl --user call "$DEST" "$PATH_PREFIX" "$MGR" DisableUnitFiles asb 1 "$UNIT" false >/dev/null
+        echo "Disabled $UNIT"
+        ;;
+    status)
+        [[ -z "$UNIT" ]] && { echo "Usage: systemctl --user status <unit>" >&2; exit 1; }
+        ESCAPED=$(echo "$UNIT" | sed 's/-/_2d/g; s/\./_2e/g; s/@/_40/g')
+        UNIT_PATH="$PATH_PREFIX/unit/$ESCAPED"
+
+        ACTIVE=$(busctl --user get-property "$DEST" "$UNIT_PATH" org.freedesktop.systemd1.Unit ActiveState 2>/dev/null | sed 's/^s "\(.*\)"$/\1/' || echo "unknown")
+        SUB=$(busctl --user get-property "$DEST" "$UNIT_PATH" org.freedesktop.systemd1.Unit SubState 2>/dev/null | sed 's/^s "\(.*\)"$/\1/' || echo "unknown")
+        LOAD=$(busctl --user get-property "$DEST" "$UNIT_PATH" org.freedesktop.systemd1.Unit LoadState 2>/dev/null | sed 's/^s "\(.*\)"$/\1/' || echo "unknown")
+        DESC=$(busctl --user get-property "$DEST" "$UNIT_PATH" org.freedesktop.systemd1.Unit Description 2>/dev/null | sed 's/^s "\(.*\)"$/\1/' || echo "$UNIT")
+        PID=$(busctl --user get-property "$DEST" "$UNIT_PATH" org.freedesktop.systemd1.Service MainPID 2>/dev/null | sed 's/^u //' || echo "0")
+
+        echo "● $UNIT - $DESC"
+        echo "     Loaded: $LOAD"
+        echo "     Active: $ACTIVE ($SUB)"
+        [[ "$PID" != "0" ]] && echo "   Main PID: $PID"
+
+        # Exit code matches systemctl convention
+        [[ "$ACTIVE" == "active" ]]
+        ;;
+    *)
+        echo "systemctl wrapper: unsupported subcommand '$SUBCMD' in sandbox mode" >&2
+        echo "Supported: start, stop, restart, reload, daemon-reload, status, is-active, is-enabled, enable, disable" >&2
+        exit 1
+        ;;
+esac

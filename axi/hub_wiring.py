@@ -57,9 +57,9 @@ def _make_agent_options(session: AgentSession, resume_id: str | None) -> Any:
             "allowUnsandboxedCommands": False,
             "excludedCommands": ["git", "systemctl", "uv", "ts-ssh", "ts-curl"],
             "network": {
+                "allowAllUnixSockets": True,
                 "allowUnixSockets": [
                     str(config.BRIDGE_SOCKET_PATH),
-                    os.path.join(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"), "bus"),
                 ],
             },
         },
