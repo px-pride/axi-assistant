@@ -284,7 +284,22 @@ ALLOWED_CWDS: list[str] = _base_cwds + ADMIN_ALLOWED_CWDS
 # User configuration management
 # ---------------------------------------------------------------------------
 
-VALID_MODELS = {"haiku", "sonnet", "opus"}
+VALID_MODELS = {"haiku", "sonnet", "opus", "codex", "codex-mini"}
+
+CODEX_MODELS = {"codex", "codex-mini"}
+
+# Map Axi aliases to actual OpenAI model names (None = use codex default)
+CODEX_MODEL_MAP: dict[str, str | None] = {
+    "codex": None,
+    "codex-mini": "gpt-5.4-mini",
+}
+
+
+def is_codex_model(model: str) -> bool:
+    """Check if a model alias refers to a Codex backend model."""
+    return model in CODEX_MODELS
+
+
 _config_lock = threading.Lock()
 
 
