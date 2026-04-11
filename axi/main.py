@@ -2385,6 +2385,24 @@ def _register_master_agent(resume_id: str | None, prompt_hash: str | None) -> Ag
     return session
 
 
+def _register_egress_snowflakes(bot: discord.Client) -> None:
+    """Register guild and channel snowflake IDs for egress filtering."""
+    from axi.egress_filter import register_snowflakes
+
+    ids: dict[str, str] = {}
+    guild = bot.get_guild(config.DISCORD_GUILD_ID)
+    if guild:
+        ids[str(guild.id)] = "[guild-id]"
+        for ch in guild.channels:
+            ids[str(ch.id)] = "[channel-id]"
+    # Also register the bot's own user ID
+    if bot.user:
+        ids[str(bot.user.id)] = "[bot-id]"
+    if ids:
+        register_snowflakes(ids)
+        log.info("Egress filter: registered %d snowflake IDs", len(ids))
+
+
 async def _setup_guild_infrastructure(master_session: AgentSession) -> None:
     """Set up Discord guild categories and master channel."""
     try:
@@ -2618,6 +2636,9 @@ async def on_ready() -> None:
         master_resume_id, master_old_prompt_hash = _load_master_session_data()
         master_session = _register_master_agent(master_resume_id, master_old_prompt_hash)
         await _setup_guild_infrastructure(master_session)
+
+        # Register known Discord snowflake IDs for egress filtering
+        _register_egress_snowflakes(bot)
 
         _startup_t0 = time.monotonic()
         master_ch = await agents.get_master_channel()

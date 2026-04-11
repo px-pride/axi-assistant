@@ -1,8 +1,5 @@
 """Egress filter: scrub secrets from text before it reaches Discord.
 
-Targeted at known secret formats to minimize false positives — agent output
-frequently contains code blocks, UUIDs, hashes, and base64 content.
-
 Also provides path-based access control for file reads and uploads.
 """
 
@@ -17,39 +14,84 @@ import re
 # ---------------------------------------------------------------------------
 
 # Discord bot tokens: base64-encoded bot ID.timestamp.HMAC
-# Starts with M, N, or O (first char of base64-encoded snowflake IDs)
 _DISCORD_TOKEN_RE = re.compile(
     r"[MNO][a-zA-Z\d_-]{23,25}\.[a-zA-Z\d_-]{6}\.[a-zA-Z\d_-]{27,}"
+)
+
+# Discord webhook URLs (contain tokens in the URL path)
+_DISCORD_WEBHOOK_RE = re.compile(
+    r"https?://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/[a-zA-Z\d_-]+"
+)
+
+# Anthropic API keys
+_ANTHROPIC_KEY_RE = re.compile(r"sk-ant-[a-zA-Z\d_-]{20,}")
+
+# GitHub tokens (classic PATs, fine-grained PATs, OAuth tokens)
+_GITHUB_TOKEN_RE = re.compile(
+    r"(?:ghp_|gho_|ghs_|ghr_|github_pat_)[a-zA-Z\d_]{20,}"
 )
 
 # AWS access key IDs (always start with AKIA)
 _AWS_KEY_RE = re.compile(r"AKIA[0-9A-Z]{16}")
 
+# SSH private key blocks
+_SSH_KEY_RE = re.compile(
+    r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
+    r"[\s\S]*?"
+    r"-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
+)
+
 # Generic "secret" assignments in config/env style: KEY=<long-high-entropy-value>
-# Only matches when preceded by common secret variable name patterns
 _ENV_SECRET_RE = re.compile(
-    r"(?:DISCORD_TOKEN|SECRET_KEY|API_KEY|API_SECRET|ACCESS_TOKEN|AUTH_TOKEN)"
+    r"(?:DISCORD_TOKEN|SECRET_KEY|API_KEY|API_SECRET|ACCESS_TOKEN|AUTH_TOKEN"
+    r"|ANTHROPIC_API_KEY|OPENAI_API_KEY|GITHUB_TOKEN|PRIVATE_KEY)"
     r"\s*[=:]\s*\S{20,}",
     re.IGNORECASE,
 )
 
 _PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (_SSH_KEY_RE, "[REDACTED:private-key]"),
+    (_DISCORD_WEBHOOK_RE, "[REDACTED:webhook-url]"),
     (_DISCORD_TOKEN_RE, "[REDACTED:discord-token]"),
+    (_ANTHROPIC_KEY_RE, "[REDACTED:anthropic-key]"),
+    (_GITHUB_TOKEN_RE, "[REDACTED:github-token]"),
     (_AWS_KEY_RE, "[REDACTED:aws-key]"),
     (_ENV_SECRET_RE, "[REDACTED:secret]"),
 ]
 
+# ---------------------------------------------------------------------------
+# Discord snowflake ID filtering
+# ---------------------------------------------------------------------------
+# Known guild and channel IDs loaded at init time. These are replaced with
+# generic placeholders to prevent leaking server structure.
+
+_SNOWFLAKE_REPLACEMENTS: dict[str, str] = {}
+
+
+def register_snowflakes(ids: dict[str, str]) -> None:
+    """Register Discord snowflake IDs to filter.
+
+    *ids* maps snowflake ID strings to replacement labels, e.g.
+    ``{"1475248473682215214": "[guild]", "1479924707552923802": "[channel]"}``.
+    """
+    _SNOWFLAKE_REPLACEMENTS.update(ids)
+
+
+def _scrub_snowflakes(text: str) -> str:
+    """Replace registered snowflake IDs in text."""
+    for snowflake, label in _SNOWFLAKE_REPLACEMENTS.items():
+        text = text.replace(snowflake, label)
+    return text
+
 
 def scrub_secrets(text: str) -> str:
-    """Replace known secret patterns in *text* with redaction markers.
-
-    Designed for low false-positive rate: only matches specific, well-defined
-    secret formats. When in doubt, lets content through.
-    """
+    """Replace known secret patterns and registered snowflake IDs in *text*."""
     if not text:
         return text
     for pattern, replacement in _PATTERNS:
         text = pattern.sub(replacement, text)
+    if _SNOWFLAKE_REPLACEMENTS:
+        text = _scrub_snowflakes(text)
     return text
 
 
