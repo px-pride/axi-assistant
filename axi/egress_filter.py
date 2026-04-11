@@ -42,10 +42,26 @@ _SSH_KEY_RE = re.compile(
 )
 
 # Generic "secret" assignments in config/env style: KEY=<long-high-entropy-value>
+# Matches both explicit names and wildcard suffixes like JWT_SECRET, DB_PASSWORD, etc.
 _ENV_SECRET_RE = re.compile(
+    # Explicit legacy names (backward compat)
     r"(?:DISCORD_TOKEN|SECRET_KEY|API_KEY|API_SECRET|ACCESS_TOKEN|AUTH_TOKEN"
-    r"|ANTHROPIC_API_KEY|OPENAI_API_KEY|GITHUB_TOKEN|PRIVATE_KEY)"
+    r"|ANTHROPIC_API_KEY|OPENAI_API_KEY|GITHUB_TOKEN|PRIVATE_KEY"
+    # Wildcard suffix patterns: anything ending in _SECRET, _TOKEN, _KEY, _PASSWORD, _CREDENTIAL
+    r"|\w+_SECRET|\w+_TOKEN|\w+_KEY|\w+_PASSWORD|\w+_CREDENTIAL)"
     r"\s*[=:]\s*\S{20,}",
+    re.IGNORECASE,
+)
+
+# Credential URLs: protocol://user:password@host (database URLs, Redis, AMQP, etc.)
+_CREDENTIAL_URL_RE = re.compile(
+    r"://\w+:[^@\s]{3,}@",
+)
+
+# Generic token assignments in YAML/JSON config style: some_token: <value>
+# or some_token = <value> — case-insensitive, requires 20+ char value
+_GENERIC_TOKEN_RE = re.compile(
+    r"\w*token\s*[:=]\s*\S{20,}",
     re.IGNORECASE,
 )
 
@@ -57,6 +73,8 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (_GITHUB_TOKEN_RE, "[REDACTED:github-token]"),
     (_AWS_KEY_RE, "[REDACTED:aws-key]"),
     (_ENV_SECRET_RE, "[REDACTED:secret]"),
+    (_CREDENTIAL_URL_RE, "[REDACTED:credential-url]"),
+    (_GENERIC_TOKEN_RE, "[REDACTED:secret]"),
 ]
 
 # ---------------------------------------------------------------------------

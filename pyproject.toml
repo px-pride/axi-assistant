@@ -7,7 +7,7 @@ dependencies = [
     "claude-agent-sdk",
     "python-dotenv",
     "croniter",
-    "httpx",
+    "httpx[socks]",
     "tzdata>=2025.3",
     "arrow",
     "flowcoder-engine",
