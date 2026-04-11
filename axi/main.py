@@ -1822,18 +1822,18 @@ async def build_user_profile_cmd(interaction: discord.Interaction, agent_name: s
 
 
 async def _run_music_prefs_interview(session: AgentSession, channel: TextChannel) -> None:
-    """Inject music_prefs_interview.md into the agent so Claude conducts the interview."""
-    interview_path = os.path.join(config.BOT_DIR, ".claude", "commands", "music_prefs_interview.md")
+    """Inject build_music_preferences.md into the agent so Claude conducts the interview."""
+    interview_path = os.path.join(config.BOT_DIR, ".claude", "commands", "build_music_preferences.md")
     prefs_path = os.path.join(config.AXI_USER_DATA, "profile", "refs", "music-preferences.md")
 
     try:
         with open(interview_path) as f:
             interview_instructions = f.read()
     except FileNotFoundError:
-        await channel.send("*System:* Could not find `music_prefs_interview.md`. Cannot start interview.")
+        await channel.send("*System:* Could not find `build_music_preferences.md`. Cannot start interview.")
         return
     except OSError as e:
-        await channel.send(f"*System:* Error reading music_prefs_interview.md: {e}")
+        await channel.send(f"*System:* Error reading build_music_preferences.md: {e}")
         return
 
     # Expand %(axi_user_data)s in instructions
@@ -1854,12 +1854,12 @@ async def _run_music_prefs_interview(session: AgentSession, channel: TextChannel
 
 
 @bot.tree.command(
-    name="music-prefs",
+    name="build-music-preferences",
     description="Interactive music preferences interview — builds your listening profile for auto-dj.",
 )
 @app_commands.autocomplete(agent_name=agent_autocomplete)
-async def music_prefs_cmd(interaction: discord.Interaction, agent_name: str | None = None) -> None:
-    log.info("Slash command /music-prefs agent=%s from %s", agent_name, interaction.user)
+async def build_music_preferences_cmd(interaction: discord.Interaction, agent_name: str | None = None) -> None:
+    log.info("Slash command /build-music-preferences agent=%s from %s", agent_name, interaction.user)
 
     resolved = await _resolve_agent(interaction, agent_name)
     if resolved is None:
@@ -1900,7 +1900,7 @@ async def music_prefs_cmd(interaction: discord.Interaction, agent_name: str | No
             await interaction.followup.send(f"*System:* Music preferences interview timed out for **{agent_name}**.")
         except Exception as e:
             log.exception("Failed to run music preferences interview for agent '%s'", agent_name)
-            await interaction.followup.send(f"Failed to start music preferences interview for **{agent_name}**: {e}")
+            await interaction.followup.send(f"Failed to run music preferences interview for **{agent_name}**: {e}")
         finally:
             session.activity = ActivityState(phase="idle")
 

@@ -61,7 +61,7 @@ Write Context Notes after this phase.
 ### Phase 5: Confirm
 
 - Show the user a brief summary of everything written
-- Remind them they can run `/music-prefs` again anytime to update specific sections
+- Remind them they can run `/build-music-preferences` again anytime to update specific sections
 - Write the final version of the file
 
 ## Writing Rules

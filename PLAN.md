@@ -3,7 +3,7 @@
 ## Deliverables
 
 1. **Music preferences document** at `~/app-user-data/axi-assistant/profile/refs/music-preferences.md`
-2. **Axi skill** (Discord slash command `/music-prefs`) that interactively populates it
+2. **Axi skill** (Discord slash command `/build-music-preferences`) that interactively populates it
 
 ---
 
@@ -29,7 +29,7 @@ Add to `USER_PROFILE.md` (line 13, after the Music entry):
 ```yaml
 ---
 # Music Preferences — structured data for auto-dj and Axi agents
-# Last updated by /music-prefs skill
+# Last updated by /build-music-preferences skill
 
 version: 1
 
@@ -150,36 +150,36 @@ context_notes: []
 
 ---
 
-## 2. Axi Skill: `/music-prefs`
+## 2. Axi Skill: `/build-music-preferences`
 
 ### Pattern
 
 Follows the `/build-user-profile` pattern from `main.py`:
 - Discord slash command registered on the bot
-- Loads instruction file from `.claude/commands/music_prefs_interview.md`
+- Loads instruction file from `.claude/commands/build_music_preferences.md`
 - Injects instructions as a query into the agent session
 - Agent conducts interactive conversation, writes results to the preferences file
 
 ### Implementation Files
 
-1. **`main.py`** — Add `/music-prefs` slash command (same pattern as `/build-user-profile`)
-2. **`.claude/commands/music_prefs_interview.md`** — Interview instructions for Claude
+1. **`main.py`** — Add `/build-music-preferences` slash command (same pattern as `/build-user-profile`)
+2. **`.claude/commands/build_music_preferences.md`** — Interview instructions for Claude
 
 ### Slash Command (main.py)
 
 ```python
 @bot.tree.command(
-    name="music-prefs",
+    name="build-music-preferences",
     description="Interactive music preferences interview — builds your listening profile for auto-dj.",
 )
 @app_commands.autocomplete(agent_name=agent_autocomplete)
-async def music_prefs_cmd(interaction, agent_name=None):
+async def build_music_preferences_cmd(interaction, agent_name=None):
     # Same lifecycle as /build-user-profile: resolve agent, acquire lock, wake if needed,
     # inject interview instructions, stream response.
     # Output path: ~/app-user-data/axi-assistant/profile/refs/music-preferences.md
 ```
 
-### Interview Instructions (`.claude/commands/music_prefs_interview.md`)
+### Interview Instructions (`.claude/commands/build_music_preferences.md`)
 
 The instruction file tells Claude how to conduct the interview. Key sections:
 
@@ -213,7 +213,7 @@ The instruction file tells Claude how to conduct the interview. Key sections:
 **Phase 6: Write & confirm**
 - Write the complete `music-preferences.md` file
 - Show the user a summary of what was written
-- Remind them they can run `/music-prefs` again anytime to update
+- Remind them they can run `/build-music-preferences` again anytime to update
 
 #### Key Behaviors
 
@@ -262,5 +262,5 @@ No new extension needed. This is a standalone skill (slash command + instruction
 |------|--------|-------------|
 | `~/app-user-data/axi-assistant/profile/refs/music-preferences.md` | Create | New preferences document |
 | `~/app-user-data/axi-assistant/profile/USER_PROFILE.md` | Edit line 13 | Add music-preferences ref entry |
-| `axi/main.py` | Add ~80 lines after line 1816 | `/music-prefs` slash command |
-| `.claude/commands/music_prefs_interview.md` | Create | Interview instructions |
+| `axi/main.py` | Add ~80 lines after line 1816 | `/build-music-preferences` slash command |
+| `.claude/commands/build_music_preferences.md` | Create | Interview instructions |
