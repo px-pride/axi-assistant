@@ -2660,6 +2660,24 @@ async def on_ready() -> None:
         global _startup_complete
         _startup_complete = True
 
+        if config.HTTP_API_PORT:
+            import uvicorn
+            from axi.http_api import app as http_app
+
+            uvi_config = uvicorn.Config(
+                http_app,
+                host=config.HTTP_API_HOST,
+                port=config.HTTP_API_PORT,
+                log_level="warning",
+            )
+            _http_server = uvicorn.Server(uvi_config)
+            _http_server.install_signal_handlers = lambda: None
+            _http_task = asyncio.create_task(_http_server.serve())
+            _http_task.add_done_callback(
+                lambda t: log.error("HTTP API server exited unexpectedly: %s", t.exception()) if t.exception() else None
+            )
+            log.info("HTTP API server starting on %s:%s", config.HTTP_API_HOST, config.HTTP_API_PORT)
+
         _startup_elapsed = time.monotonic() - _startup_t0
         startup_span.set_attribute("startup.elapsed_s", _startup_elapsed)
         master_ch = await agents.get_master_channel()
