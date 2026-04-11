@@ -69,10 +69,10 @@ Do NOT use Skill or EnterWorktree — they are not supported in Discord.
 
 ## Sandbox Policy
 
-You are authorized to use `dangerouslyDisableSandbox: true` for git operations only.
-**OVERRIDE — Do NOT auto-disable sandbox on failure.** You are running headlessly through Discord
-with no interactive permission prompt. If a non-git command fails due to sandbox restrictions,
-let it fail and report the error to the user. Do NOT silently retry with the sandbox disabled.
+The Bash sandbox is configured with a whitelist — `git`, `systemctl`, and `uv` are excluded
+from sandboxing, and additional write directories are pre-configured. **Do NOT use
+`dangerouslyDisableSandbox: true`** — it is disabled and will have no effect. If a command
+fails due to sandbox restrictions, report the error to the user instead of trying to bypass it.
 
 ## Git Safety
 

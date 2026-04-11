@@ -12,6 +12,7 @@ added via router.add().
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING, Any
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
@@ -50,7 +51,21 @@ def _make_agent_options(session: AgentSession, resume_id: str | None) -> Any:
         include_partial_messages=True,
         stderr=make_stderr_callback(session),
         resume=resume_id,
-        sandbox={"enabled": True, "autoAllowBashIfSandboxed": True},
+        sandbox={
+            "enabled": True,
+            "autoAllowBashIfSandboxed": True,
+            "allowUnsandboxedCommands": False,
+            "excludedCommands": ["git", "systemctl", "uv"],
+            "network": {
+                "allowUnixSockets": [str(config.BRIDGE_SOCKET_PATH)],
+            },
+        },
+        add_dirs=[
+            config.AXI_USER_DATA,
+            config.BOT_WORKTREES_DIR,
+            os.path.expanduser("~/.config/axi"),
+            os.path.expanduser("~/.config/minflow"),
+        ],
         mcp_servers=session.mcp_servers or {},
         disallowed_tools=[],
         extra_args={"debug-to-stderr": None},
