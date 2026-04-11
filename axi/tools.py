@@ -155,8 +155,6 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
     set_agent_context(agent_name or "unknown")
     set_trigger("mcp_tool", detail="axi_spawn_agent")
     _tracer.start_span("tool.axi_spawn_agent", attributes={"agent.name": agent_name}).end()
-    default_cwd = os.path.join(config.AXI_USER_DATA, "agents", agent_name) if agent_name else config.AXI_USER_DATA
-    agent_cwd = os.path.realpath(os.path.expanduser(args.get("cwd", default_cwd)))
     agent_prompt = args.get("prompt", "")
     agent_resume = args.get("resume")
     agent_type = "flowcoder"
@@ -166,6 +164,35 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
     no_worktree = args.get("no_worktree", False)
     compact_instructions = args.get("compact_instructions")
     mcp_server_names: list[str] = args.get("mcp_servers") or []
+
+    # Respawn detection: if a channel already exists for this agent, it's a
+    # respawn (kill + re-create).  Default cwd to the previous session's cwd
+    # (stored in channel topic) and default no_worktree=True (the agent is
+    # replacing itself, not competing with another agent for the same cwd).
+    # Search killed categories too — killed agents' channels live there.
+    is_respawn = False
+    previous_cwd: str | None = None
+    if agent_name:
+        existing_channel = await channels.get_agent_channel(
+            agent_name, include_killed=True
+        )
+        if existing_channel is not None:
+            is_respawn = True
+            prev_cwd, _, _, _ = channels.parse_channel_topic(existing_channel.topic)
+            if prev_cwd:
+                previous_cwd = prev_cwd
+
+    if is_respawn and "no_worktree" not in args:
+        no_worktree = True
+
+    cwd_explicit = "cwd" in args
+    if cwd_explicit:
+        agent_cwd = os.path.realpath(os.path.expanduser(args["cwd"]))
+    elif previous_cwd:
+        agent_cwd = previous_cwd
+    else:
+        default_cwd = os.path.join(config.AXI_USER_DATA, "agents", agent_name) if agent_name else config.AXI_USER_DATA
+        agent_cwd = os.path.realpath(os.path.expanduser(default_cwd))
 
     # Resolve custom MCP servers from config
     extra_mcp_servers = config.load_mcp_servers(mcp_server_names) if mcp_server_names else None
@@ -256,6 +283,14 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
             except Exception:
                 pass
 
+    if is_respawn:
+        log.info(
+            "Respawn detected for '%s': no_worktree=%s, cwd_source=%s, cwd=%s",
+            agent_name,
+            no_worktree,
+            "explicit" if cwd_explicit else ("previous" if previous_cwd else "default"),
+            agent_cwd,
+        )
     log.info(
         "Spawning agent '%s' via MCP tool (type=%s, cwd=%s, resume=%s, extensions=%s)",
         agent_name,

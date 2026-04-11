@@ -485,8 +485,15 @@ async def move_channel_to_killed(agent_name: str) -> None:
                 return
 
 
-async def get_agent_channel(agent_name: str) -> TextChannel | None:
-    """Get the Discord channel for an agent, if it exists."""
+async def get_agent_channel(
+    agent_name: str, *, include_killed: bool = False
+) -> TextChannel | None:
+    """Get the Discord channel for an agent, if it exists.
+
+    By default only searches Axi and Active categories.  Pass
+    ``include_killed=True`` to also search Killed categories (useful for
+    respawn detection where the channel still holds metadata like cwd).
+    """
     assert _bot is not None
     assert _agents_dict is not None
     session = _agents_dict.get(agent_name)
@@ -497,7 +504,10 @@ async def get_agent_channel(agent_name: str) -> TextChannel | None:
             if isinstance(ch, TextChannel):
                 return ch
     normalized = normalize_channel_name(agent_name)
-    for cat in axi_categories + active_categories:
+    cats = axi_categories + active_categories
+    if include_killed:
+        cats = cats + killed_categories
+    for cat in cats:
         for ch in cat.text_channels:
             if _match_channel_name(ch.name, normalized):
                 return ch
