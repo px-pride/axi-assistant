@@ -637,6 +637,10 @@ from discordquery import split_message
 
 async def send_long(channel: TextChannel, text: str) -> discord.Message | None:
     """Send a potentially long message, splitting as needed. Returns the last sent message."""
+    from axi.egress_filter import scrub_secrets
+
+    text = scrub_secrets(text)
+
     # Track channel activity for recency reordering
     mark_channel_active(channel.id)
 
@@ -722,6 +726,15 @@ def make_cwd_permission_callback(allowed_cwd: str, session: AgentSession | None 
 
         if tool_name == "AskUserQuestion":
             return await _handle_ask_user_question(session, tool_input)
+
+        if tool_name == "Read":
+            from axi.egress_filter import is_path_blocked
+
+            path = tool_input.get("file_path") or ""
+            if path and is_path_blocked(path):
+                return PermissionResultDeny(
+                    message=f"Access denied: reading {path} is blocked (sensitive file)"
+                )
 
         if tool_name in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
             path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""

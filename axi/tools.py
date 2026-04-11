@@ -560,8 +560,14 @@ async def get_date_and_time(args: McpArgs) -> McpResult:
     },
 )
 async def discord_send_file(args: McpArgs) -> McpResult:
+    from axi.egress_filter import is_path_blocked
+
     file_path = args["file_path"]
     _tracer.start_span("tool.discord_send_file", attributes={"file.path": file_path}).end()
+
+    if is_path_blocked(file_path):
+        return {"content": [{"type": "text", "text": f"Access denied: uploading {file_path} is blocked (sensitive file)"}], "is_error": True}
+
     content = args.get("content", "")
     channel_id = args.get("channel_id")
     if not channel_id:

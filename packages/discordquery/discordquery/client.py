@@ -24,7 +24,7 @@ import asyncio
 import logging
 import time
 import urllib.parse
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -157,6 +157,9 @@ class AsyncDiscordClient:
             headers={"Authorization": f"Bot {token}"},
             timeout=timeout,
         )
+        # Optional content filter — called on outgoing message text before send/edit.
+        # Set to a callable(str) -> str to scrub content (e.g. secret redaction).
+        self.content_filter: Callable[[str], str] | None = None
 
     async def __aenter__(self) -> AsyncDiscordClient:
         return self
@@ -265,6 +268,8 @@ class AsyncDiscordClient:
 
     async def send_message(self, channel_id: str | int, content: str) -> dict[str, Any]:
         """Send a text message to a channel. Returns the message object."""
+        if self.content_filter:
+            content = self.content_filter(content)
         return await self.post(f"/channels/{channel_id}/messages", json={"content": content})
 
     async def send_file(
@@ -277,6 +282,8 @@ class AsyncDiscordClient:
         """Send a file attachment to a channel. Returns the message object."""
         data: dict[str, str] = {}
         if content:
+            if self.content_filter:
+                content = self.content_filter(content)
             data["content"] = content
         files = {"files[0]": (filename, file_data)}
         resp = await self.request(
@@ -289,6 +296,8 @@ class AsyncDiscordClient:
 
     async def edit_message(self, channel_id: str | int, message_id: str | int, content: str) -> dict[str, Any]:
         """Edit an existing message. Returns the updated message object."""
+        if self.content_filter:
+            content = self.content_filter(content)
         resp = await self.request(
             "PATCH",
             f"/channels/{channel_id}/messages/{message_id}",

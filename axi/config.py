@@ -396,3 +396,6 @@ KILLED_CATEGORY_NAME = "Killed"
 from discordquery import AsyncDiscordClient
 
 discord_client = AsyncDiscordClient(DISCORD_TOKEN)
+
+from axi.egress_filter import scrub_secrets  # noqa: E402
+discord_client.content_filter = scrub_secrets

@@ -81,7 +81,9 @@ def build_engine_env(options: ClaudeAgentOptions | None = None) -> dict[str, str
     Env var chain:
       os.environ → options.env → SDK required vars → strip CLAUDECODE
     """
-    env = dict(os.environ)
+    # Copy env but strip secrets — agents use MCP tools, not direct tokens.
+    _SENSITIVE_ENV_VARS = {"DISCORD_TOKEN"}
+    env = {k: v for k, v in os.environ.items() if k not in _SENSITIVE_ENV_VARS}
 
     # Merge user-provided env vars (from ClaudeAgentOptions.env)
     if options and getattr(options, "env", None):
