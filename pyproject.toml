@@ -32,7 +32,7 @@ flowcoder-engine = { git = "https://github.com/px-pride/flowcoder.git", rev = "e
 flowcoder-flowchart = { git = "https://github.com/px-pride/flowcoder.git", rev = "e434782", subdirectory = "packages/flowcoder-flowchart" }
 flowcoder-tui = { path = "packages/flowcoder_tui", editable = true }
 procmux = { path = "packages/procmux", editable = true }
-claudewire = { git = "https://github.com/leroux/claudewire.git", subdirectory = "py" }
+claudewire = { git = "https://github.com/px-pride/claudewire.git", subdirectory = "py" }
 discordquery = { path = "packages/discordquery", editable = true }
 agenthub = { path = "packages/agenthub", editable = true }
 
