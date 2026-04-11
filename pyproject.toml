@@ -1,5 +1,5 @@
 [project]
-name = "personal-assistant"
+name = "axi-assistant"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
