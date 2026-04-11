@@ -49,6 +49,7 @@ def _make_agent_options(session: AgentSession, resume_id: str | None) -> Any:
         thinking={"type": "adaptive"},
         setting_sources=["local"],
         permission_mode="plan" if session.plan_mode else "default",
+        permission_prompt_tool_name="stdio",
         cwd=session.cwd,
         system_prompt=session.system_prompt,
         include_partial_messages=True,
