@@ -72,6 +72,7 @@ def _make_agent_options(session: AgentSession, resume_id: str | None) -> Any:
             config.BOT_WORKTREES_DIR,
             os.path.expanduser("~/.config/axi"),
             os.path.expanduser("~/.config/minflow"),
+            os.path.expanduser("~/.cache/uv"),
         ],
         mcp_servers=session.mcp_servers or {},
         disallowed_tools=[],
