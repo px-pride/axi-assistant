@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from packages.discordquery.discordquery.client import DiscordClient
+from discordquery.client import DiscordClient
 
 CATEGORY_NAMES = {"Axi", "Active", "Killed"}
 # Match overflow categories like "Killed 2", "Active 3"
