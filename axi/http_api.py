@@ -24,6 +24,7 @@ class TriggerRequest(BaseModel):
     session: str
     prompt: str
     cwd: str | None = None
+    extensions: list[str] | None = None
 
 
 @app.post("/v1/trigger")
@@ -39,7 +40,7 @@ async def trigger(req: TriggerRequest) -> dict[str, str]:
 
         log.info("HTTP trigger: spawning new session '%s'", agent_name)
         await agents.reclaim_agent_name(agent_name)
-        await agents.spawn_agent(agent_name, agent_cwd, req.prompt)
+        await agents.spawn_agent(agent_name, agent_cwd, req.prompt, extensions=req.extensions)
         return {"status": "ok", "action": "spawned"}
     except Exception:
         log.exception("HTTP trigger failed for session '%s'", agent_name)
