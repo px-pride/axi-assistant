@@ -376,6 +376,41 @@ def make_schedule_mcp_server(agent_name: str, schedules_path: str, agent_cwd: st
                     return _text(f"Enabled schedule '{name}'.")
             return _error(f"Schedule '{name}' not found.")
 
+    async def handle_schedule_modify(args: dict[str, Any]) -> dict[str, Any]:
+        name = (args.get("name") or "").strip()
+        if not name:
+            return _error("Name is required.")
+
+        updates = {k: v for k, v in args.items() if k != "name" and v is not None}
+        if not updates:
+            return _error("No fields to update. Provide at least one field to change.")
+
+        # Validate fields
+        valid_fields = {"prompt", "cron", "at", "cwd", "session", "reset_context"}
+        invalid = set(updates.keys()) - valid_fields
+        if invalid:
+            return _error(f"Cannot modify fields: {', '.join(sorted(invalid))}. Valid: {', '.join(sorted(valid_fields))}.")
+
+        if "prompt" in updates and len(updates["prompt"]) > _MAX_PROMPT_LEN:
+            return _error(f"Prompt too long ({len(updates['prompt'])} chars). Max is {_MAX_PROMPT_LEN}.")
+        if "cron" in updates and not croniter.is_valid(updates["cron"]):
+            return _error(f"Invalid cron expression: '{updates['cron']}'.")
+        if "cwd" in updates and not os.path.isabs(updates["cwd"]):
+            return _error(f"cwd must be an absolute path, got: '{updates['cwd']}'.")
+
+        async with schedules_lock:
+            entries = _load(schedules_path)
+            for e in entries:
+                if e.get("name") == name and (e.get("owner") or e.get("session")) == agent_name:
+                    for k, v in updates.items():
+                        if k == "cron":
+                            e["schedule"] = v
+                        else:
+                            e[k] = v
+                    _save(schedules_path, entries)
+                    return _text(f"Updated schedule '{name}': {', '.join(sorted(updates.keys()))}.")
+            return _error(f"Schedule '{name}' not found.")
+
     # -- Build SdkMcpTool instances ---------------------------------------
 
     list_tool = SdkMcpTool(
@@ -430,6 +465,15 @@ def make_schedule_mcp_server(agent_name: str, schedules_path: str, agent_cwd: st
                     "description": (
                         "Absolute path to the working directory for the agent "
                         "session that handles this schedule. Required."
+                    ),
+                },
+                "session": {
+                    "type": "string",
+                    "description": (
+                        "Agent session name to route this schedule to. "
+                        "If set, the schedule fires in a dedicated agent session "
+                        "instead of routing to the calling agent. Use this to "
+                        "prevent schedule events from clobbering the owner's session."
                     ),
                 },
                 "reset_context": {
@@ -492,8 +536,48 @@ def make_schedule_mcp_server(agent_name: str, schedules_path: str, agent_cwd: st
         handler=handle_schedule_enable,
     )
 
+    modify_tool = SdkMcpTool(
+        name="schedule_modify",
+        description="Modify fields of an existing scheduled task. Only provided fields are updated.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "The name of the schedule to modify.",
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "New prompt text.",
+                },
+                "cron": {
+                    "type": "string",
+                    "description": "New cron expression (for recurring schedules).",
+                },
+                "at": {
+                    "type": "string",
+                    "description": "New ISO 8601 datetime (for one-off schedules).",
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "New working directory path.",
+                },
+                "session": {
+                    "type": "string",
+                    "description": "New session name for routing.",
+                },
+                "reset_context": {
+                    "type": "boolean",
+                    "description": "Whether to reset context when firing.",
+                },
+            },
+            "required": ["name"],
+        },
+        handler=handle_schedule_modify,
+    )
+
     return create_sdk_mcp_server(
         name="schedule",
         version="1.0.0",
-        tools=[list_tool, create_tool, delete_tool, disable_tool, enable_tool],
+        tools=[list_tool, create_tool, modify_tool, delete_tool, disable_tool, enable_tool],
     )

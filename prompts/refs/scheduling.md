@@ -5,6 +5,7 @@ Use the schedule MCP tools to manage scheduled events. Do NOT edit schedules.jso
 Available tools:
 - **schedule_list** — List all scheduled tasks (you see all schedules as the master agent).
 - **schedule_create** — Create a new scheduled task.
+- **schedule_modify** — Modify fields of an existing schedule (prompt, cron, cwd, session, reset_context).
 - **schedule_delete** — Delete a scheduled task by name.
 - **schedule_disable** — Disable a schedule without deleting it.
 - **schedule_enable** — Re-enable a disabled schedule.
@@ -22,6 +23,7 @@ Type-specific fields:
 - **at** (string): ISO 8601 datetime with timezone for one-off events (e.g. "2026-03-01T14:00:00-08:00")
 
 Optional fields:
+- **session** (string): agent session name to route to. If set, the schedule fires in a dedicated session instead of routing to the owner. Prevents schedule events from clobbering the owner's session.
 - **reset_context** (boolean): resets conversation before firing
 
 IMPORTANT: Cron times are evaluated in the SCHEDULE_TIMEZONE configured in .env (US/Pacific), NOT in UTC.

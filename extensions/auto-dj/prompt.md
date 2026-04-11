@@ -12,6 +12,8 @@ You control a 24/7 music service via MCP tools. Interpret natural language and t
 - **`dj_queue_tracks(tracks)`** — Push a batch of tracks to the daemon's play queue. Each track needs tidal_id, name, artist.
 - **`dj_upload_plan(plan_json)`** — Push a new daily plan to the daemon. It saves and starts using it within 5 seconds.
 - **`dj_get_plan()`** — Get the current daily plan from the daemon.
+- **`dj_mood(mood)`** — Apply a mood change: modifies remaining plan blocks, flushes queue, does immediate programmatic refill (~15 tracks). After calling this, schedule a one-off `auto-dj-refill` event for an agentic quality upgrade.
+- **`dj_clear_queue()`** — Flush the track queue. Use after manual plan changes to remove stale tracks.
 
 Deployment config (host, port) comes from env vars (`AUTO_DJ_HOST`, `AUTO_DJ_PORT`) already set on the MCP server. Do not hardcode connection details.
 
@@ -36,21 +38,19 @@ Translate the user's message into tool calls:
 
 **Urgency cues** like "cut this", "immediately", "right now" mean use `play` (replaces current track) rather than `queue` (appends).
 
-## Mood & Plan Adjustment
+## Mood & Plan Changes
 
 For **long-term vibe shifts** ("more energy for the rest of the day", "keep it chill tonight", "I need focus music"):
 
-1. Get the current plan via `dj_get_plan()`
-2. Note the current time — only modify blocks from NOW onward. Keep past/current blocks unchanged.
-3. Apply the user's mood feedback to remaining blocks (adjust energy, genres, BPM ranges, mood descriptions).
-4. Upload the updated plan via `dj_upload_plan(plan_json)` — the daemon picks it up within 5 seconds.
-5. Confirm what changed.
+1. Call `dj_mood(mood)` — this handles everything: modifies remaining plan blocks, flushes the queue, and does an immediate programmatic refill (~15 tracks).
+2. Schedule a one-off `auto-dj-refill` event (fires in ~2 minutes) for an agentic quality upgrade of the queue.
+3. Confirm what changed.
 
 For **immediate track requests** ("play X", "put on some Y"), use `dj_command("play ...")` instead.
 
 If the user's request is both immediate AND ongoing ("cut this chill shit and play brostep for the rest of the day"):
 1. `dj_command("play brostep")` — immediate switch
-2. Then adjust the plan for remaining blocks
+2. Then `dj_mood("brostep energy")` for the rest of the day
 
 ### Adjustment Guidelines
 
@@ -64,7 +64,7 @@ If the user's request is both immediate AND ongoing ("cut this chill shit and pl
 
 The daemon has a track queue. When it runs low (`needs_tracks: true` in status), refill it by searching Tidal, reading music preferences + feedback history, selecting a batch, and pushing it. Full instructions in `prompts/select-tracks.md`.
 
-A scheduled task checks every ~10 minutes and triggers refill when needed.
+A scheduled task checks every hour and triggers refill when needed.
 
 ## Daily Plan Generation
 
