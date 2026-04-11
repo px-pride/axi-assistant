@@ -4,8 +4,8 @@ Axi is a Discord-based personal assistant powered by Claude Code. It runs as a p
 
 ## Table of Contents
 
-- [Architecture Overview](#architecture-overview)
 - [Setup](#setup)
+- [Architecture Overview](#architecture-overview)
 - [Multi-Agent System](#multi-agent-system)
 - [Extensions & Flowcharts](#extensions--flowcharts)
 - [Schedule System](#schedule-system)
@@ -15,64 +15,6 @@ Axi is a Discord-based personal assistant powered by Claude Code. It runs as a p
 - [Test Instances](#test-instances)
 - [HTTP API](#http-api)
 - [Configuration](#configuration)
-
----
-
-## Architecture Overview
-
-```
-axi/supervisor.py (process supervisor — crash detection, rollback, hot restart)
-  |
-  +-- procmux bridge (Unix socket, persistent across bot restarts)
-  |
-  +-- axi/main.py (Discord bot + asyncio event loop)
-       |
-       +-- on_ready()        --> guild setup, master session, schedule loop, crash recovery
-       +-- on_message()      --> routes messages by channel to the owning agent
-       +-- slash commands    --> /list-agents, /kill-agent, /spawn, /restart, /stop, /skip, ...
-       |
-       +-- scheduler task loop (every 30s)
-       |    +-- cron & one-off event firing
-       |    +-- idle agent sleep (configurable timeout)
-       |    +-- idle agent reminders (escalating)
-       |
-       +-- Agent sessions (ClaudeSDKClient via claudewire/procmux)
-            +-- axi-master   (always present, full Axi personality)
-            +-- spawned agents (extensions-based prompts, sandboxed to cwd)
-            +-- crash-handler  (auto-spawned after crashes, if enabled)
-```
-
-**Key files:**
-
-| File | Purpose |
-|---|---|
-| `axi/supervisor.py` | Process supervisor with crash recovery and optional auto-rollback |
-| `axi/main.py` | Discord bot setup, slash commands, scheduling, idle management |
-| `axi/agents.py` | Agent lifecycle — spawn, wake, sleep, kill, message routing |
-| `axi/handlers.py` | Agent message handler, flowchart execution integration |
-| `axi/channels.py` | Per-agent Discord channel management, category system |
-| `axi/config.py` | Centralized configuration, env vars, paths, constants |
-| `axi/tools.py` | MCP tools exposed to agents (spawn, kill, message, Discord API) |
-| `axi/prompts.py` | System prompt assembly — SOUL + extensions + user profile |
-| `axi/http_api.py` | HTTP trigger endpoint for external integrations |
-| `axi/worktrees.py` | Git worktree creation, merge queue, cleanup |
-| `axi_test.py` | CLI for managing isolated test instances |
-| `prompts/SOUL.md` | Core personality and behavioral directives |
-| `commands/` | FlowCoder flowchart definitions (soul.json, etc.) |
-| `extensions/` | Modular prompt fragments and hooks |
-| `.env` | Instance-specific configuration (gitignored) |
-
-**Internal packages** (in `packages/`):
-
-| Package | Purpose |
-|---|---|
-| `agenthub` | Multi-agent orchestration library — lifecycle, concurrency, rate limits |
-| `claudewire` | Stream-JSON protocol wrapper for the Claude Agent SDK |
-| `discordquery` | Lightweight Discord REST client (pure httpx, no discord.py dependency) |
-| `procmux` | Process multiplexer over Unix socket for hot restart support |
-| `flowcoder_engine` | FlowCoder execution engine for flowchart-driven agent behavior |
-| `flowcoder_flowchart` | FlowCoder flowchart loader and tools |
-| `flowcoder_tui` | TUI for testing FlowCoder charts locally |
 
 ---
 
@@ -142,6 +84,64 @@ On first startup, Axi will automatically create `#axi-master` and category chann
 Once Axi is running, use the `/build-user-profile` slash command in Discord to start a conversational interview. Axi will ask you about your preferences, context, and working style, then save the results to `AXI_USER_DATA/profile/`. This profile is injected into every agent's system prompt to personalize Axi's behavior.
 
 The profile is optional — Axi works without it, but personalization improves response quality significantly.
+
+---
+
+## Architecture Overview
+
+```
+axi/supervisor.py (process supervisor — crash detection, rollback, hot restart)
+  |
+  +-- procmux bridge (Unix socket, persistent across bot restarts)
+  |
+  +-- axi/main.py (Discord bot + asyncio event loop)
+       |
+       +-- on_ready()        --> guild setup, master session, schedule loop, crash recovery
+       +-- on_message()      --> routes messages by channel to the owning agent
+       +-- slash commands    --> /list-agents, /kill-agent, /spawn, /restart, /stop, /skip, ...
+       |
+       +-- scheduler task loop (every 30s)
+       |    +-- cron & one-off event firing
+       |    +-- idle agent sleep (configurable timeout)
+       |    +-- idle agent reminders (escalating)
+       |
+       +-- Agent sessions (ClaudeSDKClient via claudewire/procmux)
+            +-- axi-master   (always present, full Axi personality)
+            +-- spawned agents (extensions-based prompts, sandboxed to cwd)
+            +-- crash-handler  (auto-spawned after crashes, if enabled)
+```
+
+**Key files:**
+
+| File | Purpose |
+|---|---|
+| `axi/supervisor.py` | Process supervisor with crash recovery and optional auto-rollback |
+| `axi/main.py` | Discord bot setup, slash commands, scheduling, idle management |
+| `axi/agents.py` | Agent lifecycle — spawn, wake, sleep, kill, message routing |
+| `axi/handlers.py` | Agent message handler, flowchart execution integration |
+| `axi/channels.py` | Per-agent Discord channel management, category system |
+| `axi/config.py` | Centralized configuration, env vars, paths, constants |
+| `axi/tools.py` | MCP tools exposed to agents (spawn, kill, message, Discord API) |
+| `axi/prompts.py` | System prompt assembly — SOUL + extensions + user profile |
+| `axi/http_api.py` | HTTP trigger endpoint for external integrations |
+| `axi/worktrees.py` | Git worktree creation, merge queue, cleanup |
+| `axi_test.py` | CLI for managing isolated test instances |
+| `prompts/SOUL.md` | Core personality and behavioral directives |
+| `commands/` | FlowCoder flowchart definitions (soul.json, etc.) |
+| `extensions/` | Modular prompt fragments and hooks |
+| `.env` | Instance-specific configuration (gitignored) |
+
+**Internal packages** (in `packages/`):
+
+| Package | Purpose |
+|---|---|
+| `agenthub` | Multi-agent orchestration library — lifecycle, concurrency, rate limits |
+| `claudewire` | Stream-JSON protocol wrapper for the Claude Agent SDK |
+| `discordquery` | Lightweight Discord REST client (pure httpx, no discord.py dependency) |
+| `procmux` | Process multiplexer over Unix socket for hot restart support |
+| `flowcoder_engine` | FlowCoder execution engine for flowchart-driven agent behavior |
+| `flowcoder_flowchart` | FlowCoder flowchart loader and tools |
+| `flowcoder_tui` | TUI for testing FlowCoder charts locally |
 
 ---
 
