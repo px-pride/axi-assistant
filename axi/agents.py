@@ -1245,7 +1245,7 @@ async def _set_session_id(session: AgentSession, msg_or_sid: Any, channel: TextC
         # it would cause the same failure on next wake.
         log.debug("Skipping session_id update for '%s': %s matches failed resume ID", session.name, sid[:8])
         return
-    if sid and sid != session.session_id:
+    if sid != session.session_id:
         session.session_id = sid
         if session.name == config.MASTER_AGENT_NAME:
             _save_master_session(session)

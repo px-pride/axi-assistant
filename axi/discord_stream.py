@@ -263,6 +263,7 @@ class _StreamCtx:
         "deferred_msg",
         "flush_count",
         "got_result",
+        "had_flowchart",
         "hit_rate_limit",
         "hit_transient_error",
         "in_flowchart",
@@ -288,6 +289,7 @@ class _StreamCtx:
         self.msg_total: int = 0
         self.tool_input_json: str = ""  # Accumulates full tool input JSON for current tool_use block
         self.in_flowchart: bool = False  # True during flowchart execution (protects session_id)
+        self.had_flowchart: bool = False  # True once a flowchart ran (survives flowchart_complete)
         self.suppress_stream: bool = False  # True when current block has output_schema (JSON is internal)
         self.live_edit: _LiveEditState | None = live_edit  # Set when STREAMING_DISCORD is enabled
         self.thinking_message: discord.Message | None = None  # Temporary "thinking..." indicator
@@ -679,28 +681,28 @@ async def _handle_result_message(
         await _flush_text(ctx, session, channel, "result_msg")
     ctx.text_buffer = ""
 
-    # Flowchart results use session_id="flowchart" — don't update agent session or record usage
-    if msg.session_id == "flowchart":
-        if session.agent_log:
-            session.agent_log.info(
-                "FLOWCHART_RESULT: cost=$%s turns=%d duration=%dms error=%s",
-                msg.total_cost_usd,
-                msg.num_turns,
-                msg.duration_ms,
-                msg.is_error,
-            )
+    # Always log result to journal (agent_log may not be initialized for reconstructed agents)
+    result_preview = msg.result[:500] if msg.result else None
+    log.info(
+        "RESULT agent=%s: cost=$%s turns=%d duration=%dms error=%s session=%s result=%s",
+        session.name,
+        msg.total_cost_usd,
+        msg.num_turns,
+        msg.duration_ms,
+        msg.is_error,
+        msg.session_id,
+        result_preview,
+    )
+
+    # Flowchart results — don't update agent session or record usage.
+    # session_id may be "flowchart" (no inner session) or the inner Claude's session_id.
+    # had_flowchart catches the case where flowchart_complete arrives before the
+    # ResultMessage (failure path) — in_flowchart is already False by then.
+    if ctx.in_flowchart or ctx.had_flowchart or msg.session_id == "flowchart":
         return
 
     assert _set_session_id_fn is not None
     await _set_session_id_fn(session, msg, channel=channel)
-    if session.agent_log:
-        session.agent_log.info(
-            "RESULT: cost=$%s turns=%d duration=%dms session=%s",
-            msg.total_cost_usd,
-            msg.num_turns,
-            msg.duration_ms,
-            msg.session_id,
-        )
     _record_session_usage(session.name, msg)
 
 
@@ -804,11 +806,32 @@ async def _handle_system_message(
         status = "**completed**" if data.get("status") == "completed" else "**failed**"
         assert _send_system is not None
         await _send_system(channel, f"Flowchart {status} in {duration_s:.0f}s | Cost: ${cost:.4f} | Blocks: {blocks}")
-        # Persist inner Claude's session_id so resume works after flowchart turns
+        # Persist inner Claude's session_id so resume works after flowchart turns.
+        # Only persist from successful runs — failed runs generate phantom
+        # session_ids that don't have conversation data on disk, causing an
+        # infinite cascade where each wake tries to resume a nonexistent session.
         fc_session_id = data.get("session_id")
-        if fc_session_id and fc_session_id != session.session_id:
+        if fc_session_id and fc_session_id != session.session_id and data.get("status") == "completed":
             assert _set_session_id_fn is not None
             await _set_session_id_fn(session, fc_session_id, channel=channel)
+        # Detect resume failure: if the flowchart failed with 0 cost and 0 blocks,
+        # inner Claude likely died on startup (e.g. "No conversation found" from a
+        # bad --resume). Clear the session_id so the next wake starts fresh instead
+        # of retrying the same dead session.
+        if (
+            data.get("status") != "completed"
+            and cost == 0
+            and blocks == 0
+            and session.session_id
+        ):
+            log.warning(
+                "Flowchart failed with 0 cost/blocks for '%s' — clearing session_id "
+                "(likely resume failure for session %s)",
+                session.name,
+                session.session_id[:8],
+            )
+            assert _set_session_id_fn is not None
+            await _set_session_id_fn(session, None, channel=channel)
 
 
 # ---------------------------------------------------------------------------
@@ -895,6 +918,7 @@ async def stream_response_to_channel(session: AgentSession, channel: TextChannel
             elif isinstance(msg, SystemMessage):
                 if msg.subtype == "flowchart_start":
                     ctx.in_flowchart = True
+                    ctx.had_flowchart = True
                 elif msg.subtype == "flowchart_complete":
                     ctx.in_flowchart = False
                 await _handle_system_message(session, channel, msg, ctx)
