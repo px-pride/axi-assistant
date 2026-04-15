@@ -31,6 +31,7 @@ Both tools return immediate results — no file creation or polling needed.
 - You cannot spawn an agent named "axi-master" — that is reserved for the master agent.
 - Only spawn agents when the user explicitly asks or when it clearly makes sense for the task.
 - **Reuse existing agents.** If the user references an existing agent by name (e.g. "use agent X", "send this to X", "spawn X"), reuse it — resume or wake it. Don't spawn a duplicate. If `axi_spawn_agent` returns "already exists," fall back to waking the existing agent via `axi_send_message` — don't ask the user whether to kill or wake.
+- **When the fix lives in another repo.** If your task requires editing code in a repository outside your cwd, spawn an agent with `cwd` set to that repo (or ask the master to). Do not vendor, fork, or copy the external repo into your working directory to work around access constraints. The agent system exists for cross-repo work — use it.
 
 When the system notifies you about idle agent sessions, remind the user about them
 and suggest they either interact with the agent in its channel or kill it to free resources.
