@@ -51,7 +51,6 @@ def _truncate_mcp_text(text: str, total_messages: int) -> str:
     if newline != -1:
         kept = kept[newline + 1:]
     kept_lines = kept.count("\n") + 1
-    dropped = total_messages - kept_lines
     notice = f"[Truncated: showing {kept_lines} of {total_messages} messages. Use 'before' parameter to paginate for older messages.]\n"
     return notice + kept
 
@@ -68,7 +67,6 @@ def _resolve_snowflake(value: str) -> int:
         dt = dt.replace(tzinfo=UTC)
     ms = int(dt.timestamp() * 1000)
     return (ms - _DISCORD_EPOCH_MS) << 22
-from axi.schedule_tools import make_schedule_mcp_server
 
 
 async def _resolve_channel(channel_arg: str) -> str:
@@ -122,11 +120,11 @@ _tracer = trace.get_tracer(__name__)
             "resume": {"type": "string", "description": "Optional session ID to resume a previous agent session"},
             "command": {
                 "type": "string",
-                "description": "Flowcoder command name",
+                "description": "FlowCoder command name (only used when AXI_HARNESS=flowcoder)",
             },
             "command_args": {
                 "type": "string",
-                "description": "Arguments for the flowcoder command (shell-style string)",
+                "description": "Arguments for the FlowCoder command (shell-style string, only used when AXI_HARNESS=flowcoder)",
             },
             "extensions": {
                 "type": "array",
@@ -171,7 +169,7 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
     _tracer.start_span("tool.axi_spawn_agent", attributes={"agent.name": agent_name}).end()
     agent_prompt = args.get("prompt", "")
     agent_resume = args.get("resume")
-    agent_type = "flowcoder"
+    agent_type = config.get_default_agent_type()
     fc_command = args.get("command", "")
     fc_command_args = args.get("command_args", "")
     agent_extensions = args.get("extensions")  # None = use defaults, [] = no extensions
@@ -238,9 +236,19 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
             "is_error": True,
         }
 
-    if not config.FLOWCODER_ENABLED:
+    if agent_type == "flowcoder" and not config.FLOWCODER_ENABLED:
         return {
             "content": [{"type": "text", "text": "Error: flowcoder integration is disabled."}],
+            "is_error": True,
+        }
+    if agent_type != "flowcoder" and (fc_command or fc_command_args):
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Error: command and command_args are only supported when AXI_HARNESS=flowcoder.",
+                }
+            ],
             "is_error": True,
         }
 
@@ -328,7 +336,7 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
         "content": [
             {
                 "type": "text",
-                "text": f"Agent '{agent_name}' (flowcoder) spawn initiated in {agent_cwd}. The agent's channel will be notified when it's ready.",
+                "text": f"Agent '{agent_name}' ({agent_type}) spawn initiated in {agent_cwd}. The agent's channel will be notified when it's ready.",
             }
         ]
     }
@@ -1071,5 +1079,3 @@ discord_mcp_server = create_sdk_mcp_server(
         discord_wait_for_message,
     ],
 )
-
-

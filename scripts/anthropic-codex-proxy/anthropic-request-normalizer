@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+"""Normalize Anthropic Messages requests before forwarding to anthropic-proxy.
+
+Claude Code can send request blocks that are valid Anthropic API payloads but
+newer than the installed anthropic-proxy-rs request model. This front proxy
+keeps the public endpoint stable while converting those blocks into the subset
+the proxy can deserialize.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+
+HOP_BY_HOP_HEADERS = {
+    "connection",
+    "content-encoding",
+    "content-length",
+    "host",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+}
+
+
+def block_text(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        pieces: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                pieces.append(item)
+                continue
+            if not isinstance(item, dict):
+                pieces.append(json.dumps(item, separators=(",", ":")))
+                continue
+            item_type = item.get("type")
+            if item_type in {"text", "input_text", "output_text"}:
+                pieces.append(str(item.get("text", "")))
+            elif item_type == "image":
+                source = item.get("source") or {}
+                pieces.append(f"[image: {source.get('media_type', 'unknown')}]")
+            else:
+                pieces.append(json.dumps(item, separators=(",", ":")))
+        return "\n".join(piece for piece in pieces if piece)
+    if isinstance(content, dict):
+        if content.get("type") in {"text", "input_text", "output_text"}:
+            return str(content.get("text", ""))
+        return json.dumps(content, separators=(",", ":"))
+    return str(content)
+
+
+def normalize_content_block(block: Any) -> dict[str, Any] | None:
+    if isinstance(block, str):
+        return {"type": "text", "text": block}
+    if not isinstance(block, dict):
+        return {"type": "text", "text": json.dumps(block, separators=(",", ":"))}
+
+    block_type = block.get("type")
+    if block_type == "tool_result":
+        normalized = dict(block)
+        normalized["content"] = block_text(block.get("content"))
+        return normalized
+    if block_type == "tool_use":
+        normalized = dict(block)
+        if normalized.get("input") is None:
+            normalized["input"] = {}
+        return normalized
+    if block_type == "text":
+        normalized = dict(block)
+        normalized["text"] = str(normalized.get("text", ""))
+        return normalized
+    if block_type == "image":
+        source = block.get("source")
+        if isinstance(source, dict) and source.get("type") == "base64":
+            return dict(block)
+        return {"type": "text", "text": block_text([block])}
+    if block_type == "thinking":
+        normalized = dict(block)
+        normalized["thinking"] = str(normalized.get("thinking", ""))
+        return normalized
+    if block_type in {"redacted_thinking", "server_tool_use", "web_search_tool_result"}:
+        return None
+
+    return {"type": "text", "text": json.dumps(block, separators=(",", ":"))}
+
+
+def normalize_message_content(content: Any) -> Any:
+    if isinstance(content, list):
+        return [
+            normalized
+            for block in content
+            if (normalized := normalize_content_block(block)) is not None
+        ]
+    return content
+
+
+def normalize_anthropic_request(body: Any) -> Any:
+    if not isinstance(body, dict):
+        return body
+
+    normalized = dict(body)
+    messages = normalized.get("messages")
+    if isinstance(messages, list):
+        normalized_messages = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                normalized_messages.append(msg)
+                continue
+            next_msg = dict(msg)
+            if "content" in next_msg:
+                next_msg["content"] = normalize_message_content(next_msg["content"])
+            normalized_messages.append(next_msg)
+        normalized["messages"] = normalized_messages
+
+    return normalized
+
+
+class Handler(BaseHTTPRequestHandler):
+    target = ""
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        sys.stderr.write(f"[{self.log_date_time_string()}] {fmt % args}\n")
+
+    def do_GET(self) -> None:
+        self.forward("GET")
+
+    def do_HEAD(self) -> None:
+        self.send_response(200)
+        self.end_headers()
+
+    def do_POST(self) -> None:
+        length = int(self.headers.get("content-length", "0") or "0")
+        raw_body = self.rfile.read(length) if length else b""
+        body = raw_body
+
+        content_type = self.headers.get("content-type", "")
+        path = urllib.parse.urlsplit(self.path).path
+        if "application/json" in content_type and path.rstrip("/").endswith("/v1/messages"):
+            try:
+                parsed = json.loads(raw_body.decode("utf-8"))
+                normalized = normalize_anthropic_request(parsed)
+                body = json.dumps(normalized, separators=(",", ":")).encode("utf-8")
+            except Exception as exc:
+                self.log_message("normalization skipped after error: %s", exc)
+                body = raw_body
+
+        self.forward("POST", body)
+
+    def forward(self, method: str, body: bytes | None = None) -> None:
+        url = self.target.rstrip("/") + self.path
+        headers = {
+            key: value
+            for key, value in self.headers.items()
+            if key.lower() not in HOP_BY_HOP_HEADERS
+        }
+        if body is not None:
+            headers["content-length"] = str(len(body))
+        headers["x-anthropic-normalized"] = "tool-result-content"
+
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+
+        try:
+            resp = urllib.request.urlopen(req, timeout=300)
+        except urllib.error.HTTPError as exc:
+            resp = exc
+        except Exception as exc:
+            payload = json.dumps({"error": {"message": str(exc)}}).encode("utf-8")
+            self.send_response(502)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
+        self.send_response(resp.status)
+        for key, value in resp.headers.items():
+            if key.lower() not in HOP_BY_HOP_HEADERS:
+                self.send_header(key, value)
+        self.end_headers()
+
+        while True:
+            chunk = resp.read(65536)
+            if not chunk:
+                break
+            self.wfile.write(chunk)
+            self.wfile.flush()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--listen-host", default="127.0.0.1")
+    parser.add_argument("--listen-port", type=int, default=3000)
+    parser.add_argument("--target", default="http://127.0.0.1:3001")
+    args = parser.parse_args()
+
+    Handler.target = args.target
+    server = ThreadingHTTPServer((args.listen_host, args.listen_port), Handler)
+    sys.stderr.write(
+        f"anthropic-request-normalizer listening on "
+        f"http://{args.listen_host}:{args.listen_port} -> {args.target}\n"
+    )
+    server.serve_forever()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

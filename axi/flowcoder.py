@@ -21,7 +21,6 @@ log = logging.getLogger(__name__)
 
 from claudewire.config import SDK_VERSION as _SDK_VERSION
 
-
 # ------------------------------------------------------------------
 # Shared helpers
 # ------------------------------------------------------------------
@@ -157,7 +156,7 @@ def _build_claude_cli_args(options: Any) -> list[str]:
 
     # Model
     model: str | None = getattr(options, "model", None)
-    if model:
+    if model and model != "env":
         cmd.extend(["--model", model])
     fallback_model: str | None = getattr(options, "fallback_model", None)
     if fallback_model:
@@ -301,33 +300,12 @@ def build_engine_cli_args(options: ClaudeAgentOptions) -> list[str]:
     exact flag logic of claude-code-sdk's SubprocessCLITransport._build_command()
     without importing from the SDK.
     """
-    from axi.config import CODEX_MODEL_MAP, is_codex_model
-
-    model: str | None = getattr(options, "model", None)
-
     # Engine-specific prefix
     cmd: list[str] = [get_engine_binary()]
     for sp in get_search_paths():
         cmd += ["--search-path", sp]
 
-    # Select codex backend when model is a codex alias
-    if model and is_codex_model(model):
-        cmd += ["--backend", "codex"]
-
     # Claude CLI flags — built directly from options
     cmd += _build_claude_cli_args(options)
-
-    # Map codex alias to actual model name (or remove --model for default)
-    if model and is_codex_model(model):
-        actual = CODEX_MODEL_MAP.get(model)
-        try:
-            idx = cmd.index("--model")
-            if actual:
-                cmd[idx + 1] = actual
-            else:
-                del cmd[idx : idx + 2]
-        except ValueError:
-            if actual:
-                cmd.extend(["--model", actual])
 
     return cmd

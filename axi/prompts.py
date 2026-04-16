@@ -66,7 +66,10 @@ def _load_prompt_file(path: str, variables: dict[str, str] | None = None) -> str
     return content
 
 
-_PROMPT_VARS = {"axi_user_data": config.AXI_USER_DATA, "bot_dir": config.BOT_DIR}
+_PROMPT_VARS = {
+    "axi_user_data": config.AXI_USER_DATA,
+    "bot_dir": config.BOT_DIR,
+}
 
 _PROMPTS_DIR = os.path.join(config.BOT_DIR, "prompts")
 _SOUL = _load_prompt_file(os.path.join(_PROMPTS_DIR, "SOUL.md"), _PROMPT_VARS)

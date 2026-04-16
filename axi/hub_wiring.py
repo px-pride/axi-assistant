@@ -43,8 +43,18 @@ def _make_agent_options(session: AgentSession, resume_id: str | None) -> Any:
     """
     from axi.agents import make_stderr_callback
 
+    _, resolved_model, resolved_env = config.get_resolved_model()
+    base_env = {
+        "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "100",
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+        "PATH": os.path.join(config.BOT_DIR, "bin") + ":" + os.environ.get("PATH", ""),
+    }
+    for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL"):
+        base_env.pop(key, None)
+    base_env.update(resolved_env)
+
     return ClaudeAgentOptions(
-        model=session.model or config.get_model(),
+        model=resolved_model,
         effort=config.get_effort(),
         thinking={"type": "adaptive"},
         setting_sources=["local"],
@@ -59,7 +69,7 @@ def _make_agent_options(session: AgentSession, resume_id: str | None) -> Any:
             "enabled": True,
             "autoAllowBashIfSandboxed": True,
             "allowUnsandboxedCommands": False,
-            "excludedCommands": ["git", "gh", "systemctl", "uv", "ts-ssh", "ts-curl"] + session.extra_excluded_commands,
+            "excludedCommands": ["git", "systemctl", "uv", "ts-ssh", "ts-curl"],
             "network": {
                 "allowAllUnixSockets": True,
                 "allowUnixSockets": [
@@ -73,15 +83,11 @@ def _make_agent_options(session: AgentSession, resume_id: str | None) -> Any:
             os.path.expanduser("~/.config/axi"),
             os.path.expanduser("~/.config/minflow"),
             os.path.expanduser("~/.cache/uv"),
-        ] + session.extra_write_dirs,
+        ],
         mcp_servers=session.mcp_servers or {},
         disallowed_tools=[],
         extra_args={"debug-to-stderr": None},
-        env={
-            "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "100",
-            "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
-            "PATH": os.path.join(config.BOT_DIR, "bin") + ":" + os.environ.get("PATH", ""),
-        },
+        env=base_env,
     )
 
 

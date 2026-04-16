@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+port="${PORT:-3000}"
+pid_file="${ANTHROPIC_PROXY_CODEX_PID_FILE:-/tmp/anthropic-proxy-codex.pid}"
+log_file="${ANTHROPIC_PROXY_CODEX_LOG:-/tmp/anthropic-proxy-codex.log}"
+cmd="${1:-start}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
+
+running_pid() {
+  if [[ -f "$pid_file" ]]; then
+    local pid
+    pid="$(cat "$pid_file")"
+    if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+      printf '%s\n' "$pid"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+case "$cmd" in
+  start)
+    if pid="$(running_pid)"; then
+      echo "anthropic-proxy-codex is already running with pid $pid"
+      exit 0
+    fi
+
+    mkdir -p "$(dirname "$pid_file")" "$(dirname "$log_file")"
+    setsid "$script_dir/anthropic-proxy-codex" --port "$port" "$@" >>"$log_file" 2>&1 &
+    pid="$!"
+    printf '%s\n' "$pid" >"$pid_file"
+
+    for _ in $(seq 1 100); do
+      if curl -fsS "http://127.0.0.1:${port}/v1/models" >/dev/null 2>&1; then
+        echo "anthropic-proxy-codex is running on http://127.0.0.1:${port} with pid $pid"
+        exit 0
+      fi
+      if ! kill -0 "$pid" >/dev/null 2>&1; then
+        echo "anthropic-proxy-codex exited during startup. Log: $log_file" >&2
+        tail -n 30 "$log_file" >&2 || true
+        rm -f "$pid_file"
+        exit 1
+      fi
+      sleep 0.1
+    done
+
+    echo "anthropic-proxy-codex did not become healthy. Log: $log_file" >&2
+    tail -n 30 "$log_file" >&2 || true
+    exit 1
+    ;;
+
+  stop)
+    if ! pid="$(running_pid)"; then
+      echo "anthropic-proxy-codex is not running"
+      rm -f "$pid_file"
+      exit 0
+    fi
+
+    kill -TERM "-$pid" >/dev/null 2>&1 || kill -TERM "$pid" >/dev/null 2>&1 || true
+    for _ in $(seq 1 50); do
+      if ! kill -0 "$pid" >/dev/null 2>&1; then
+        rm -f "$pid_file"
+        echo "anthropic-proxy-codex stopped"
+        exit 0
+      fi
+      sleep 0.1
+    done
+    kill -KILL "-$pid" >/dev/null 2>&1 || kill -KILL "$pid" >/dev/null 2>&1 || true
+    rm -f "$pid_file"
+    echo "anthropic-proxy-codex stopped"
+    ;;
+
+  status)
+    if pid="$(running_pid)"; then
+      echo "anthropic-proxy-codex is running with pid $pid on http://127.0.0.1:${port}"
+    else
+      echo "anthropic-proxy-codex is not running"
+      exit 1
+    fi
+    ;;
+
+  *)
+    echo "usage: anthropic-proxy-codex-service {start|stop|status} [anthropic-proxy args...]" >&2
+    exit 2
+    ;;
+esac

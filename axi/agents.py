@@ -23,6 +23,9 @@ import anyio
 import discord
 import httpx
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+from claudewire import BridgeTransport
+from claudewire.events import as_stream
+from claudewire.session import disconnect_client, get_stdio_logger
 from discord import TextChannel
 from opentelemetry import context as otel_context
 from opentelemetry import trace
@@ -31,7 +34,6 @@ from agenthub.procmux_wire import ProcmuxProcessConnection
 from agenthub.tasks import BackgroundTaskSet
 from axi import channels as _channels_mod
 from axi import config, scheduler
-from axi.extensions import DEFAULT_EXTENSIONS, resolve_extension_hooks, resolve_prompt_hooks
 from axi.axi_types import (
     ActivityState,
     AgentSession,
@@ -85,6 +87,7 @@ from axi.discord_ui import (  # noqa: F401
     parse_question_answer,
     resolve_reaction_answer,
 )
+from axi.extensions import DEFAULT_EXTENSIONS, resolve_extension_hooks, resolve_prompt_hooks
 from axi.log_context import set_agent_context, set_trigger
 from axi.prompts import (
     compute_prompt_hash,
@@ -107,12 +110,10 @@ from axi.rate_limits import (
     update_rate_limit_quota as _update_rate_limit_quota,
 )
 from axi.schedule_tools import make_schedule_mcp_server
-from axi.tools import axi_mcp_server as _axi_mcp_server, discord_mcp_server as _discord_mcp_server
 from axi.shutdown import ShutdownCoordinator, exit_for_restart, kill_supervisor
+from axi.tools import axi_mcp_server as _axi_mcp_server
+from axi.tools import discord_mcp_server as _discord_mcp_server
 from axi.tracing import shutdown_tracing
-from claudewire import BridgeTransport
-from claudewire.events import as_stream
-from claudewire.session import disconnect_client, get_stdio_logger
 from procmux import ensure_running as ensure_bridge
 
 if TYPE_CHECKING:
@@ -145,7 +146,7 @@ channel_to_agent: dict[int, str] = {}  # channel_id -> agent_name
 _active_trace_ids: dict[str, str] = {}
 
 # ---------------------------------------------------------------------------
-# Soul flowchart wrapping — routes messages through /soul or /soul-flow
+# FlowCoder auto-wrap — optionally routes normal messages through a flowchart
 # ---------------------------------------------------------------------------
 
 _TS_PREFIX_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\] ")
@@ -170,19 +171,22 @@ def _is_axi_dev_cwd(cwd: str) -> bool:
     )
 
 
-def _wrap_content_with_soul(content: MessageContent, session: AgentSession) -> MessageContent:
-    """Transform message content to route through /soul or /soul-flow flowcharts.
+def _wrap_content_with_flowchart(content: MessageContent, session: AgentSession) -> MessageContent:
+    """Transform message content to route through a configured FlowCoder wrapper.
 
     - Non-string content (image blocks): returned as-is
     - //raw prefix: stripped and returned without wrapping
-    - /soul or /soul-flow commands: returned as-is (they ARE the wrappers)
-    - Other /commands: wrapped in /soul-flow if available
-    - Regular messages: wrapped in /soul with extension hooks
-    - If /soul doesn't exist or agent isn't flowcoder: returned as-is
+    - Explicit /commands: returned as-is unless using the legacy soul wrapper
+    - AXI_FC_WRAP=off/empty: returned as-is
+    - AXI_FC_WRAP=soul: legacy /soul and /soul-flow behavior
+    - AXI_FC_WRAP=<name>: regular messages become /<name> <message>
     """
     if not isinstance(content, str):
         return content
-    if session.agent_type != "flowcoder":
+    if session.agent_type != "flowcoder" or not config.FLOWCODER_ENABLED:
+        return content
+    wrap_name = config.get_fc_wrap()
+    if not wrap_name:
         return content
 
     raw = _strip_ts(content)
@@ -190,6 +194,13 @@ def _wrap_content_with_soul(content: MessageContent, session: AgentSession) -> M
     # //raw bypass — strip prefix and send directly
     if raw.startswith("//raw"):
         return raw[5:].lstrip() if len(raw) > 5 else raw
+
+    if wrap_name != "soul":
+        if raw.startswith("/") or not _command_exists(wrap_name):
+            return content
+        wrapped = f"/{wrap_name} {shlex.quote(raw)}"
+        log.info("FC_WRAP[%s] routing through /%s", session.name, wrap_name)
+        return wrapped
 
     has_soul = _command_exists("soul")
     has_soul_flow = _command_exists("soul-flow")
@@ -258,8 +269,9 @@ def _wrap_content_with_soul(content: MessageContent, session: AgentSession) -> M
     return content
 
 
-# Public alias for use from main.py / agenthub integration
-wrap_content_with_soul = _wrap_content_with_soul
+# Public aliases for use from main.py / agenthub integration
+wrap_content_with_flowchart = _wrap_content_with_flowchart
+wrap_content_with_soul = _wrap_content_with_flowchart
 
 
 def get_active_trace_tag(agent_name: str) -> str:
@@ -1096,7 +1108,7 @@ async def _rebuild_session(name: str, *, cwd: str | None = None, session_id: str
     old_cwd = session.cwd if session else config.DEFAULT_CWD
     old_channel_id = discord_state(session).channel_id if session else None
     old_mcp = getattr(session, "mcp_servers", None)
-    old_agent_type = session.agent_type if session else "flowcoder"
+    old_agent_type = session.agent_type if session else config.get_default_agent_type()
     old_mcp_names = session.mcp_server_names if session else None
     old_excluded = session.extra_excluded_commands if session else []
     old_write_dirs = session.extra_write_dirs if session else []
@@ -1179,7 +1191,7 @@ async def reconstruct_agents_from_channels() -> int:
 
             session = AgentSession(
                 name=agent_name,
-                agent_type=agent_type or "flowcoder",
+                agent_type=agent_type or config.get_default_agent_type(),
                 client=None,
                 cwd=cwd,
                 system_prompt=prompt,
@@ -1401,8 +1413,8 @@ async def process_message(session: AgentSession, content: MessageContent, channe
         session.agent_log.info("USER: %s", content_summary(content))
     log.info("PROCESS[%s] drained=%d, calling query+stream", session.name, drained)
 
-    # Route through /soul or /soul-flow if available
-    content = _wrap_content_with_soul(content, session)
+    # Route through the configured FlowCoder wrapper, if any
+    content = _wrap_content_with_flowchart(content, session)
 
     get_stdio_logger(session.name, config.LOG_DIR).debug(
         ">>> STDIN  %s", json.dumps({"type": "user", "content": content if isinstance(content, str) else "[blocks]"})
@@ -1512,7 +1524,7 @@ async def spawn_agent(
     cwd: str,
     initial_prompt: str,
     resume: str | None = None,
-    agent_type: str = "flowcoder",
+    agent_type: str | None = None,
     command: str = "",
     command_args: str = "",
     extensions: list[str] | None = None,
@@ -1523,6 +1535,7 @@ async def spawn_agent(
     model: str | None = None,
 ) -> AgentSession:
     """Spawn a new agent session and run its initial prompt in the background."""
+    agent_type = agent_type or config.get_default_agent_type()
     with _tracer.start_as_current_span(
         "spawn_agent",
         attributes={
@@ -1971,6 +1984,17 @@ async def connect_procmux() -> None:
                     await procmux_conn.send_command("kill", name=agent_name)
                 except Exception:
                     log.exception("Failed to kill orphan bridge agent '%s'", agent_name)
+                continue
+            if session.agent_type != "flowcoder" or not config.FLOWCODER_ENABLED:
+                log.warning(
+                    "Bridge has agent '%s' but session type is %s; killing stale bridge process",
+                    agent_name,
+                    session.agent_type,
+                )
+                try:
+                    await procmux_conn.send_command("kill", name=agent_name)
+                except Exception:
+                    log.exception("Failed to kill stale bridge agent '%s'", agent_name)
                 continue
 
             status = info.get("status", "unknown")

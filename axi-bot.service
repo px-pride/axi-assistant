@@ -7,14 +7,14 @@ StartLimitIntervalSec=300
 
 [Service]
 Type=simple
-WorkingDirectory=/home/pride/coding-projects/personal-assistant
-ExecStartPre=/usr/bin/uv sync --quiet
+Environment="AXI_BOT_DIR=%h/axi-assistant"
+WorkingDirectory=%E/AXI_BOT_DIR
 ExecStart=/usr/bin/uv run python -m axi.supervisor
 Restart=always
 RestartSec=5
 TimeoutStopSec=15
-Environment="HOME=/home/pride"
-Environment="PATH=/home/pride/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="HOME=%h"
+Environment="PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 [Install]
 WantedBy=default.target

@@ -27,6 +27,7 @@ __all__ = [
     "DISCORD_GUILD_ID",
     "DISCORD_TOKEN",
     "ENABLE_CRASH_HANDLER",
+    "FC_WRAP",
     "FLOWCODER_ENABLED",
     "HISTORY_PATH",
     "HTTP_API_HOST",
@@ -42,26 +43,33 @@ __all__ = [
     "QUERY_TIMEOUT",
     "RATE_LIMIT_HISTORY_PATH",
     "README_CONTENT_PATH",
-    "ROLLBACK_MARKER_PATH",
     "SCHEDULES_PATH",
     "SCHEDULE_TIMEZONE",
     "SKIPS_PATH",
     "STREAMING_DISCORD",
     "STREAMING_EDIT_INTERVAL",
     "USAGE_HISTORY_PATH",
+    "VALID_HARNESSES",
     "VALID_MODELS",
     "discord_client",
+    "get_default_agent_type",
     "get_effort",
+    "get_fc_wrap",
+    "get_harness",
     "get_model",
+    "get_model_runtime",
+    "get_resolved_model",
     "intents",
     "load_mcp_servers",
     "log",
     "set_model",
+    "uses_chatgpt_proxy",
 ]
 
 import json
 import logging
 import os
+import re
 import threading
 import time
 from datetime import timedelta
@@ -156,7 +164,76 @@ for _pkg_logger_name in ("agenthub", "claudewire"):
 # Feature flags
 # ---------------------------------------------------------------------------
 
-FLOWCODER_ENABLED = os.environ.get("FLOWCODER_ENABLED", "1").lower() in ("1", "true", "yes")
+VALID_HARNESSES = {"claude_code", "flowcoder"}
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off"}
+
+
+def _normalize_harness(value: str | None) -> str | None:
+    normalized = (value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "claude": "claude_code",
+        "claudecode": "claude_code",
+        "claude_code": "claude_code",
+        "flow_coder": "flowcoder",
+        "flowcoder": "flowcoder",
+    }
+    return aliases.get(normalized)
+
+
+def get_harness() -> str:
+    """Return the configured agent harness: ``claude_code`` or ``flowcoder``."""
+    harness = _normalize_harness(os.environ.get("AXI_HARNESS"))
+    if harness:
+        return harness
+
+    # Backwards compatibility for older installs. AXI_HARNESS is the preferred
+    # single knob; FLOWCODER_ENABLED only matters when the new knob is absent.
+    legacy_flowcoder = os.environ.get("FLOWCODER_ENABLED")
+    if legacy_flowcoder is not None and legacy_flowcoder.strip().lower() in _FALSE_VALUES:
+        return "claude_code"
+    if legacy_flowcoder is not None and legacy_flowcoder.strip().lower() in _TRUE_VALUES:
+        return "flowcoder"
+    return "flowcoder"
+
+
+def get_default_agent_type() -> str:
+    """Return the default AgentSession type for newly registered agents."""
+    return get_harness()
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    return default
+
+
+def get_fc_wrap() -> str | None:
+    """Return the FlowCoder auto-wrap flowchart name, or None when disabled."""
+    raw_value = os.environ.get("AXI_FC_WRAP")
+    if raw_value is None:
+        legacy_value = os.environ.get("AXI_SOUL_WRAP_ENABLED")
+        if legacy_value is not None:
+            return "soul" if _env_bool("AXI_SOUL_WRAP_ENABLED", default=True) else None
+        raw_value = "soul"
+
+    raw = raw_value.strip()
+    normalized = raw.lower().replace("_", "-")
+    if normalized in {"", "0", "false", "no", "off", "none"}:
+        return None
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", raw):
+        return None
+    return raw
+
+
+FLOWCODER_ENABLED = get_harness() == "flowcoder"
+FC_WRAP = get_fc_wrap()
 STREAMING_DISCORD = os.environ.get("STREAMING_DISCORD", "").lower() in ("1", "true", "yes")
 CHANNEL_STATUS_ENABLED = os.environ.get("CHANNEL_STATUS_ENABLED", "").lower() in ("1", "true", "yes")
 CHANNEL_SORT_BY_RECENCY = os.environ.get("CHANNEL_SORT_BY_RECENCY", "").lower() in ("1", "true", "yes")
@@ -285,23 +362,87 @@ ALLOWED_CWDS: list[str] = _base_cwds + ADMIN_ALLOWED_CWDS
 # User configuration management
 # ---------------------------------------------------------------------------
 
-VALID_MODELS = {"haiku", "sonnet", "opus", "codex", "codex-mini"}
-
-CODEX_MODELS = {"codex", "codex-mini"}
-
-# Map Axi aliases to actual OpenAI model names (None = use codex default)
-CODEX_MODEL_MAP: dict[str, str | None] = {
-    "codex": None,
-    "codex-mini": "gpt-5.4-mini",
+VALID_MODELS = {"haiku", "sonnet", "opus"}
+LEGACY_MODEL_ALIASES = {
+    "codex": "gpt-5.4",
 }
+_MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9._:/-]+$")
+_CHATGPT_PROXY_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "o5")
 
-
-def is_codex_model(model: str) -> bool:
-    """Check if a model alias refers to a Codex backend model."""
-    return model in CODEX_MODELS
+CHATGPT_PROXY_DEFAULT_ENV = {
+    "ANTHROPIC_API_KEY": "test",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:3000",
+    "ANTHROPIC_MODEL": "gpt-5.4",
+}
+# Backwards-compatible import name for older tests/extensions.
+CODEX_PROXY_ENV = dict(CHATGPT_PROXY_DEFAULT_ENV)
 
 
 _config_lock = threading.Lock()
+
+
+def get_effort() -> str:
+    """Get the effort level for Claude Code agent sessions."""
+    effort = os.environ.get("AXI_EFFORT", "max").strip().lower()
+    aliases = {
+        "xhigh": "max",
+        "maximum": "max",
+    }
+    effort = aliases.get(effort, effort)
+    if effort not in {"low", "medium", "high", "max"}:
+        return "max"
+    return effort
+
+
+def _normalize_model_selector(model: str) -> str:
+    model = model.strip()
+    lower = model.lower()
+    if lower in VALID_MODELS:
+        return lower
+    return LEGACY_MODEL_ALIASES.get(lower, model)
+
+
+def _is_valid_model_name(model: str) -> bool:
+    return bool(model and _MODEL_NAME_RE.fullmatch(model))
+
+
+def uses_chatgpt_proxy(model: str) -> bool:
+    """Return whether a model name should be routed through the ChatGPT proxy."""
+    normalized = _normalize_model_selector(model).lower()
+    return normalized.startswith(_CHATGPT_PROXY_MODEL_PREFIXES)
+
+
+def _chatgpt_proxy_env(model: str) -> dict[str, str]:
+    proxy_base_url = (
+        os.environ.get("AXI_CHATGPT_PROXY_BASE_URL")
+        or os.environ.get("ANTHROPIC_BASE_URL")
+        or CHATGPT_PROXY_DEFAULT_ENV["ANTHROPIC_BASE_URL"]
+    )
+    proxy_api_key = (
+        os.environ.get("AXI_CHATGPT_PROXY_API_KEY")
+        or os.environ.get("ANTHROPIC_API_KEY")
+        or CHATGPT_PROXY_DEFAULT_ENV["ANTHROPIC_API_KEY"]
+    )
+    return {
+        "ANTHROPIC_API_KEY": proxy_api_key,
+        "ANTHROPIC_BASE_URL": proxy_base_url,
+        "ANTHROPIC_MODEL": model,
+    }
+
+
+def get_model_runtime(model: str) -> tuple[str | None, dict[str, str]]:
+    """Resolve an Axi model selector into Claude model args and env vars."""
+    resolved = _normalize_model_selector(model)
+    if uses_chatgpt_proxy(resolved):
+        return None, _chatgpt_proxy_env(resolved)
+    return resolved, {}
+
+
+def get_resolved_model() -> tuple[str, str | None, dict[str, str]]:
+    """Return the configured Axi model along with resolved Claude runtime settings."""
+    model = get_model()
+    resolved_model, env = get_model_runtime(model)
+    return model, resolved_model, env
 
 
 def _load_config() -> dict[str, Any]:
@@ -325,36 +466,31 @@ def _save_config(config: dict[str, Any]) -> None:
         log.error("Failed to save config: %s", e)
 
 
-def get_effort() -> str:
-    """Get the effort level for Claude Code agent sessions.
-
-    The default is 'high' (compatible with all account tiers).
-    Override via AXI_EFFORT env var (e.g. AXI_EFFORT=max for API accounts).
-    """
-    return os.environ.get("AXI_EFFORT", "high").lower()
-
-
 def get_model() -> str:
     """Get the current model preference.
 
     The AXI_MODEL env var takes precedence over the config file.
-    This is used by test instances to force haiku.
+    Native Claude aliases and provider model IDs are both accepted.
     """
-    env_override = os.environ.get("AXI_MODEL", "").lower()
-    if env_override and env_override in VALID_MODELS:
-        return env_override
+    env_override = os.environ.get("AXI_MODEL", "").strip()
+    if env_override:
+        return _normalize_model_selector(env_override)
     with _config_lock:
         config = _load_config()
-    return config.get("model", "opus")
+    return _normalize_model_selector(str(config.get("model", "opus")))
 
 
 def set_model(model: str) -> str:
     """Set the model preference. Returns validation error string or empty string on success."""
-    if model.lower() not in VALID_MODELS:
-        return f"Invalid model '{model}'. Valid options: {', '.join(sorted(VALID_MODELS))}"
+    normalized = _normalize_model_selector(model)
+    if not _is_valid_model_name(normalized):
+        return (
+            f"Invalid model '{model}'. Use a Claude alias like "
+            f"{', '.join(sorted(VALID_MODELS))} or a provider model ID like gpt-5.4."
+        )
     with _config_lock:
         config = _load_config()
-        config["model"] = model.lower()
+        config["model"] = normalized
         _save_config(config)
     return ""
 
@@ -417,5 +553,6 @@ from discordquery import AsyncDiscordClient
 
 discord_client = AsyncDiscordClient(DISCORD_TOKEN)
 
-from axi.egress_filter import scrub_secrets  # noqa: E402
+from axi.egress_filter import scrub_secrets
+
 discord_client.content_filter = scrub_secrets

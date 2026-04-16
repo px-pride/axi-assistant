@@ -5,6 +5,8 @@ Axi is a Discord-based personal assistant powered by Claude Code. It runs as a p
 ## Table of Contents
 
 - [Setup](#setup)
+- [Runtime Configuration](#runtime-configuration)
+- [Optional: ChatGPT/Codex via Anthropic Proxy](#optional-chatgptcodex-via-anthropic-proxy)
 - [Architecture Overview](#architecture-overview)
 - [Multi-Agent System](#multi-agent-system)
 - [Extensions & Flowcharts](#extensions--flowcharts)
@@ -58,6 +60,49 @@ SCHEDULE_TIMEZONE=US/Pacific          # or your IANA timezone
 DEFAULT_CWD=/path/to/axi-assistant    # absolute path to this repo
 AXI_USER_DATA=/path/to/user-data      # where profile, schedules, etc. live
 ```
+
+### Runtime Configuration
+
+Axi separates the agent runtime from the model selection:
+
+```bash
+AXI_HARNESS=claude_code
+AXI_MODEL=opus
+```
+
+`AXI_HARNESS` can be `claude_code` or `flowcoder`. `AXI_MODEL` can be a native
+Claude alias such as `opus`, `sonnet`, or `haiku`, or a provider model ID such
+as `gpt-5.4`. `gpt-*` models route through the local ChatGPT Anthropic proxy.
+For FlowCoder, `AXI_FC_WRAP` controls the automatic wrapper flowchart; unset
+defaults to `soul`, `prompt` uses the pass-through wrapper, and `off` disables
+automatic wrapping.
+
+See [docs/axi-runtime-configuration.md](docs/axi-runtime-configuration.md) for
+examples and compatibility notes.
+
+### Optional: ChatGPT/Codex via Anthropic Proxy
+
+Axi normally uses Claude Code against Anthropic. To run the same Axi/Claude Code
+integration through a ChatGPT/Codex-backed Anthropic-compatible endpoint, install
+the helper scripts:
+
+```bash
+uv sync
+scripts/anthropic-codex-proxy/install.sh
+anthropic-proxy-codex-service start
+```
+
+Then add this to `.env`:
+
+```bash
+AXI_HARNESS=claude_code
+AXI_MODEL=gpt-5.4
+```
+
+Axi will internally route Claude Code through the local Anthropic-compatible
+proxy for `gpt-*` models. See
+[docs/chatgpt-anthropic-proxy.md](docs/chatgpt-anthropic-proxy.md)
+for the full setup, systemd option, and smoke tests.
 
 ### 4. Run
 
@@ -188,7 +233,7 @@ Agents are spawned via MCP tools — the master agent (or any admin agent) calls
 | `/restart` | Restart the bot (exit code 42, supervisor relaunches) |
 | `/stop` | Interrupt the current agent's response |
 | `/skip` | Interrupt and discard the current response |
-| `/model <model>` | Set the default model (opus/sonnet/haiku) |
+| `/model <model>` | Set the default model (opus/sonnet/haiku/gpt-5.4) |
 | `/claude-usage` | Show API rate limit status |
 | `/ping` | Check bot latency |
 | `/verbose` | Toggle tool call visibility in the channel |
@@ -234,6 +279,7 @@ Axi uses [FlowCoder](https://github.com/px-pride/flowcoder) for structured, mult
 
 | Flowchart | Purpose |
 |---|---|
+| `prompt.json` | Pass-through wrapper that sends the message to the model as-is |
 | `soul.json` | Core message handling — classify, route, execute, report |
 | `soul-flow.json` | Soul flow variant |
 | `mil.json` | Auto-execute deck cards with minimal human approval |
@@ -421,6 +467,11 @@ Routes to an existing agent session or spawns a new one. Enabled by setting `HTT
 | `SCHEDULE_TIMEZONE` | No | IANA timezone for cron expressions (default: `UTC`) |
 | `DEFAULT_CWD` | No | Default working directory for agent sessions |
 | `AXI_USER_DATA` | No | Path to user data directory (profiles, schedules, MCP configs) |
+| `AXI_HARNESS` | No | Agent runtime harness: `claude_code` or `flowcoder` |
+| `AXI_MODEL` | No | Model name or alias (`haiku`, `sonnet`, `opus`, `gpt-5.4`, etc.) |
+| `AXI_FC_WRAP` | No | FlowCoder auto-wrap command. Unset defaults to `soul`; use `prompt` for pass-through or `off` to disable |
+| `AXI_CHATGPT_PROXY_BASE_URL` | No | Override for the ChatGPT Anthropic proxy URL when using `gpt-*` models |
+| `AXI_CHATGPT_PROXY_API_KEY` | No | Override for the key sent to the ChatGPT Anthropic proxy |
 | `DAY_BOUNDARY_HOUR` | No | Hour (0-23) when a new "day" starts for planning (default: `0`) |
 | `IDLE_SLEEP_SECONDS` | No | Seconds before auto-sleeping idle agents (default: `60`) |
 | `DEFAULT_PACKS` | No | Comma-separated list of extensions to load by default |
@@ -432,7 +483,7 @@ Routes to an existing agent session or spawns a new one. Enabled by setting `HTT
 
 | Variable | Default | Description |
 |---|---|---|
-| `FLOWCODER_ENABLED` | `1` | Enable FlowCoder flowchart execution |
+| `FLOWCODER_ENABLED` | `1` | Legacy compatibility flag. Prefer `AXI_HARNESS=flowcoder` or `AXI_HARNESS=claude_code` |
 | `STREAMING_DISCORD` | `1` | Stream agent responses to Discord in real-time |
 | `CHANNEL_STATUS_ENABLED` | `1` | Show status emoji prefixes on channel names |
 | `CHANNEL_SORT_BY_RECENCY` | `1` | Reorder channels by most recent activity |

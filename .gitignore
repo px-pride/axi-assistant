@@ -60,6 +60,7 @@ record-handler/
 .crash_log_snapshot
 .active_sessions
 .bot_output.log
+.supervisor.out
 .bridge.log
 .bot.lock
 .merge-queue.json
