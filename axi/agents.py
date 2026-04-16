@@ -372,8 +372,9 @@ def _save_agent_config(
     agent_name: str,
     mcp_server_names: list[str] | None,
     extensions: list[str] | None = None,
+    model: str | None = None,
 ) -> None:
-    """Persist per-agent config (MCP servers, extensions) to disk."""
+    """Persist per-agent config (MCP servers, extensions, model) to disk."""
     config_dir = os.path.join(config.AXI_USER_DATA, "agents", agent_name)
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, "agent_config.json")
@@ -382,6 +383,8 @@ def _save_agent_config(
         data["mcp_servers"] = mcp_server_names
     if extensions is not None:
         data["extensions"] = extensions
+    if model is not None:
+        data["model"] = model
     try:
         with open(config_path, "w") as f:
             json.dump(data, f, indent=2)
@@ -1159,6 +1162,7 @@ async def reconstruct_agents_from_channels() -> int:
 
             agent_cfg = _load_agent_config(agent_name)
             saved_ext = agent_cfg.get("extensions")  # None = use defaults
+            saved_model: str | None = agent_cfg.get("model")  # None = use global AXI_MODEL
             prompt = make_spawned_agent_system_prompt(cwd, extensions=saved_ext, agent_name=agent_name)
             mcp_names = agent_cfg.get("mcp_servers") or None
             extra_mcp = config.load_mcp_servers(mcp_names) if mcp_names else None
@@ -1184,6 +1188,7 @@ async def reconstruct_agents_from_channels() -> int:
                 mcp_servers=mcp_servers,
                 extra_excluded_commands=ext_excluded,
                 extra_write_dirs=ext_write_dirs,
+                model=saved_model,
             )
             ds = discord_state(session)
             ds.channel_id = ch.id
@@ -1295,7 +1300,7 @@ async def _set_session_id(session: AgentSession, msg_or_sid: Any, channel: TextC
 async def _post_model_warning(session: AgentSession) -> None:
     """Post a warning to Discord if the agent is running on a non-opus model."""
     assert _bot is not None
-    model = config.get_model()
+    model = session.model or config.get_model()
     ds = discord_state(session)
     if model == "opus" or not ds.channel_id:
         return
@@ -1591,7 +1596,7 @@ async def spawn_agent(
 
         # Persist agent config for restart reconstruction
         resolved_ext = list(extensions) if extensions is not None else list(DEFAULT_EXTENSIONS)
-        _save_agent_config(name, mcp_names, extensions=resolved_ext)
+        _save_agent_config(name, mcp_names, extensions=resolved_ext, model=model)
         channel_to_agent[channel.id] = name
         _channels_mod.bot_creating_channels.discard(normalized)
         log.info("Agent '%s' registered (type=%s, cwd=%s, resume=%s)", name, agent_type, cwd, resume)
