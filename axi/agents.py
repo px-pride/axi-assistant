@@ -64,6 +64,7 @@ from axi.discord_stream import (  # noqa: F401
     _live_edit_tick,
     _LiveEditState,
     _pending_compact,
+    _retry_discord_503,
     _self_compacting,
     _StreamCtx,
     _update_activity,
@@ -677,7 +678,7 @@ async def send_long(channel: TextChannel, text: str) -> discord.Message | None:
                     chunk[:80],
                 )
             try:
-                last_msg = await channel.send(chunk)
+                last_msg = await _retry_discord_503(channel.send, chunk)
             except discord.NotFound:
                 agent_name = channel_to_agent.get(channel.id)
                 if agent_name:
@@ -1301,8 +1302,9 @@ async def _post_model_warning(session: AgentSession) -> None:
     channel = _bot.get_channel(ds.channel_id)
     if channel and isinstance(channel, TextChannel):
         try:
-            await channel.send(
-                f"\u26a0\ufe0f Running on **{model}** \u2014 switch to opus with `/model opus` for best results."
+            await _retry_discord_503(
+                channel.send,
+                f"\u26a0\ufe0f Running on **{model}** \u2014 switch to opus with `/model opus` for best results.",
             )
         except Exception:
             log.warning("Failed to post model warning for '%s'", session.name, exc_info=True)
@@ -1355,7 +1357,7 @@ async def _maybe_compact(session: AgentSession, channel: TextChannel) -> None:
         usage_pct * 100, cmd[:80],
     )
 
-    await channel.send(f"\U0001f504 Context at {usage_pct:.0%} ({pre_tokens:,} tokens) \u2014 compacting...")
+    await _retry_discord_503(channel.send, f"\U0001f504 Context at {usage_pct:.0%} ({pre_tokens:,} tokens) \u2014 compacting...")
     _self_compacting.add(session.name)
     _compact_start_times[session.name] = time.monotonic()
     session.compacting = True
@@ -1428,13 +1430,15 @@ async def process_message(session: AgentSession, content: MessageContent, channe
                     if post_tokens > 0 and post_tokens != pre_tokens:
                         saved = int(pre_tokens - post_tokens)
                         pct = post_tokens / session.context_window if session.context_window else 0
-                        await channel.send(
+                        await _retry_discord_503(
+                            channel.send,
                             f"\U0001f504 Compacted in {elapsed:.1f}s: {pre_tokens:,} \u2192 {post_tokens:,} tokens "
-                            f"({saved:,} freed, {pct:.0%} used) \u2014 resuming"
+                            f"({saved:,} freed, {pct:.0%} used) \u2014 resuming",
                         )
                     else:
-                        await channel.send(
-                            f"\U0001f504 Compacted in {elapsed:.1f}s ({pre_tokens:,} tokens) \u2014 resuming"
+                        await _retry_discord_503(
+                            channel.send,
+                            f"\U0001f504 Compacted in {elapsed:.1f}s ({pre_tokens:,} tokens) \u2014 resuming",
                         )
                     # Auto-resume after compaction
                     _reset_session_activity(session)

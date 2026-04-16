@@ -57,6 +57,48 @@ log = logging.getLogger("axi")
 _tracer = trace.get_tracer(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Discord 503 retry wrapper
+# ---------------------------------------------------------------------------
+
+_503_MAX_RETRIES = 5  # up to 5 retries after initial attempt (6 total)
+_503_BASE_DELAY = 1   # seconds, doubles each retry: 1, 2, 4, 8, 16
+
+
+async def _retry_discord_503(fn: Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any) -> Any:
+    """Retry a Discord API call on transient 503 errors.
+
+    Discord's Envoy proxy occasionally returns 503 Service Unavailable
+    when its internal service mesh fails momentarily. These are transient
+    and succeed on retry.
+
+    Retries up to 5 times with exponential backoff (1s, 2s, 4s, 8s, 16s).
+    """
+    for attempt in range(_503_MAX_RETRIES + 1):
+        try:
+            return await fn(*args, **kwargs)
+        except discord.errors.DiscordServerError as exc:
+            if exc.status == 503 and attempt < _503_MAX_RETRIES:
+                delay = _503_BASE_DELAY * (2 ** attempt)
+                log.warning(
+                    "Discord 503 (attempt %d/%d), retrying in %ds...",
+                    attempt + 1, _503_MAX_RETRIES + 1, delay,
+                )
+                await asyncio.sleep(delay)
+            else:
+                raise
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 503 and attempt < _503_MAX_RETRIES:
+                delay = _503_BASE_DELAY * (2 ** attempt)
+                log.warning(
+                    "Discord 503 via httpx (attempt %d/%d), retrying in %ds...",
+                    attempt + 1, _503_MAX_RETRIES + 1, delay,
+                )
+                await asyncio.sleep(delay)
+            else:
+                raise
+
+
 async def _drain_and_send_stderr(session: AgentSession, channel: TextChannel) -> None:
     """Drain stderr buffer and optionally send output as code blocks.
 
@@ -74,7 +116,7 @@ async def _drain_and_send_stderr(session: AgentSession, channel: TextChannel) ->
         stderr_text = stderr_msg.strip()
         if stderr_text:
             for part in split_message(f"```\n{stderr_text}\n```"):
-                await channel.send(part)
+                await _retry_discord_503(channel.send, part)
 
 # Explicit exports for re-export from agents.py (suppresses pyright reportPrivateUsage)
 __all__ = [
@@ -86,6 +128,7 @@ __all__ = [
     "_live_edit_finalize",
     "_live_edit_tick",
     "_pending_compact",
+    "_retry_discord_503",
     "_self_compacting",
     "_update_activity",
     "extract_tool_preview",
@@ -347,7 +390,7 @@ _STREAMING_MSG_LIMIT = 1900  # Leave room for cursor and splitting overhead
 async def _live_edit_post(le: _LiveEditState, content: str, session: AgentSession) -> None:
     """Post a new message via REST and record its ID in the live-edit state."""
     try:
-        resp = await config.discord_client.send_message(le.channel_id, content)
+        resp = await _retry_discord_503(config.discord_client.send_message, le.channel_id, content)
         le.message_id = resp["id"]
         le.content = content
         le.last_edit_time = time.monotonic()
@@ -363,7 +406,7 @@ async def _live_edit_update(le: _LiveEditState, content: str, session: AgentSess
     if le.message_id is None:
         return
     try:
-        await config.discord_client.edit_message(le.channel_id, le.message_id, content)
+        await _retry_discord_503(config.discord_client.edit_message, le.channel_id, le.message_id, content)
         le.content = content
         le.last_edit_time = time.monotonic()
         le.edit_pending = False
@@ -449,14 +492,14 @@ async def _live_edit_finalize(ctx: _StreamCtx, session: AgentSession) -> None:
             await _live_edit_update(le, chunks[0], session)
             # Remaining chunks are new messages
             for chunk in chunks[1:]:
-                resp = await config.discord_client.send_message(le.channel_id, chunk)
+                resp = await _retry_discord_503(config.discord_client.send_message, le.channel_id, chunk)
                 ctx.last_flushed_msg_id = resp["id"]
                 ctx.last_flushed_channel_id = le.channel_id
                 ctx.last_flushed_content = chunk
     elif le.message_id is None and text:
         # Never posted — just send normally
         for chunk in split_message(text):
-            resp = await config.discord_client.send_message(le.channel_id, chunk)
+            resp = await _retry_discord_503(config.discord_client.send_message, le.channel_id, chunk)
             ctx.last_flushed_msg_id = resp["id"]
             ctx.last_flushed_channel_id = le.channel_id
             ctx.last_flushed_content = chunk
@@ -472,7 +515,7 @@ async def _show_thinking(ctx: _StreamCtx, channel: TextChannel) -> None:
     """Send a temporary 'thinking...' indicator message."""
     if ctx.thinking_message is None:
         try:
-            ctx.thinking_message = await channel.send("*thinking...*")
+            ctx.thinking_message = await _retry_discord_503(channel.send, "*thinking...*")
         except Exception:
             log.debug("Failed to send thinking indicator", exc_info=True)
 
@@ -483,7 +526,7 @@ async def _hide_thinking(ctx: _StreamCtx) -> None:
     if msg is not None:
         ctx.thinking_message = None
         try:
-            await msg.delete()
+            await _retry_discord_503(msg.delete)
         except Exception:
             log.debug("Failed to delete thinking indicator", exc_info=True)
 
@@ -561,15 +604,15 @@ async def _handle_stream_event(
             thinking = session.activity.thinking_text.strip()
             if thinking:
                 file = discord.File(io.BytesIO(thinking.encode("utf-8")), filename="thinking.md")
-                await channel.send("\U0001f4ad", file=file)
+                await _retry_discord_503(channel.send, "\U0001f4ad", file=file)
                 session.activity.thinking_text = ""
         elif session.activity.phase == "waiting" and session.activity.tool_name:
             tool = session.activity.tool_name
             preview = extract_tool_preview(tool, session.activity.tool_input_preview)
             if preview:
-                await channel.send(f"`\U0001f527 {tool}: {preview[:120]}`")
+                await _retry_discord_503(channel.send, f"`\U0001f527 {tool}: {preview[:120]}`")
             else:
-                await channel.send(f"`\U0001f527 {tool}`")
+                await _retry_discord_503(channel.send, f"`\U0001f527 {tool}`")
 
     # Log stream events
     if session.agent_log:
@@ -727,7 +770,7 @@ async def _handle_system_message(
         if session.name not in _self_compacting:
             token_info = f" ({session.context_tokens:,} tokens)" if session.context_tokens else ""
             log.info("Agent '%s' compaction started (CLI-triggered)%s", session.name, token_info)
-            await channel.send(f"\U0001f504 Compacting{token_info}...")
+            await _retry_discord_503(channel.send, f"\U0001f504 Compacting{token_info}...")
 
     elif msg.subtype == "compact_boundary":
         # Clear compacting flag — compaction is done
@@ -748,7 +791,7 @@ async def _handle_system_message(
                 "start_time": start_time or time.monotonic(),
             }
         else:
-            await channel.send("\U0001f504 Context compacted")
+            await _retry_discord_503(channel.send, "\U0001f504 Context compacted")
 
     # Flowchart events (emitted by flowcoder-engine during takeover mode)
     elif msg.subtype == "block_start":
@@ -769,7 +812,7 @@ async def _handle_system_message(
         )
         ds = discord_state(session)
         if block_type not in _SILENT_BLOCK_TYPES and (ds.verbose or ds.fc_current_command not in _FC_QUIET_COMMANDS):
-            await channel.send(f"\u25b6 **{block_name}** (`{block_type}`)")
+            await _retry_discord_503(channel.send, f"\u25b6 **{block_name}** (`{block_type}`)")
 
     elif msg.subtype == "block_complete":
         if ctx:
@@ -783,7 +826,7 @@ async def _handle_system_message(
         ds = discord_state(session)
         if not data.get("success", True) and (ds.verbose or ds.fc_current_command not in _FC_QUIET_COMMANDS):
             block_name = data.get("block_name", "?")
-            await channel.send(f"> {block_name} **FAILED**")
+            await _retry_discord_503(channel.send, f"> {block_name} **FAILED**")
 
     elif msg.subtype == "flowchart_start":
         data = msg.data.get("data", {})
@@ -984,7 +1027,7 @@ async def stream_response_to_channel(session: AgentSession, channel: TextChannel
         log.info("STREAM_END[%s] result=killed msgs=%d flushes=%d", stream_id, ctx.msg_total, ctx.flush_count)
         # Ping before sleeping — user needs to know the agent stopped
         mentions = " ".join(f"<@{uid}>" for uid in config.ALLOWED_USER_IDS)
-        await channel.send(mentions)
+        await _retry_discord_503(channel.send, mentions)
         span.set_attributes({"stream.msg_total": ctx.msg_total, "stream.flush_count": ctx.flush_count})
         span.end()
         assert _sleep_agent_fn is not None
@@ -1011,12 +1054,13 @@ async def stream_response_to_channel(session: AgentSession, channel: TextChannel
             # Streaming: buffer empty, message already sent — edit to append timing
             new_content = ctx.last_flushed_content + timing_suffix
             try:
-                await config.discord_client.edit_message(
-                    ctx.last_flushed_channel_id, ctx.last_flushed_msg_id, new_content
+                await _retry_discord_503(
+                    config.discord_client.edit_message,
+                    ctx.last_flushed_channel_id, ctx.last_flushed_msg_id, new_content,
                 )
             except Exception:
                 log.warning("Failed to edit last message to append timing", exc_info=True)
-                await channel.send(f"-# {elapsed:.1f}s{_trace_tag}")
+                await _retry_discord_503(channel.send, f"-# {elapsed:.1f}s{_trace_tag}")
     else:
         # No timing — send any deferred message as-is
         if ctx.deferred_msg:
@@ -1026,7 +1070,7 @@ async def stream_response_to_channel(session: AgentSession, channel: TextChannel
     log.info("STREAM_END[%s] result=ok msgs=%d flushes=%d", stream_id, ctx.msg_total, ctx.flush_count)
 
     mentions = " ".join(f"<@{uid}>" for uid in config.ALLOWED_USER_IDS)
-    await channel.send(mentions)
+    await _retry_discord_503(channel.send, mentions)
 
     ttfe_ms = (t_first_event - t0) * 1000 if t_first_event is not None else -1
     span.set_attributes({
@@ -1107,8 +1151,9 @@ async def stream_with_retry(session: AgentSession, channel: TextChannel) -> bool
                 attempt,
                 config.API_ERROR_MAX_RETRIES,
             )
-            await channel.send(
-                f"\u26a0\ufe0f API error, retrying in {delay}s... (attempt {attempt}/{config.API_ERROR_MAX_RETRIES})"
+            await _retry_discord_503(
+                channel.send,
+                f"\u26a0\ufe0f API error, retrying in {delay}s... (attempt {attempt}/{config.API_ERROR_MAX_RETRIES})",
             )
             await asyncio.sleep(delay)
 
@@ -1132,7 +1177,7 @@ async def stream_with_retry(session: AgentSession, channel: TextChannel) -> bool
             session.name,
             config.API_ERROR_MAX_RETRIES,
         )
-        await channel.send(f"\u274c API error persisted after {config.API_ERROR_MAX_RETRIES} retries. Try again later.")
+        await _retry_discord_503(channel.send, f"\u274c API error persisted after {config.API_ERROR_MAX_RETRIES} retries. Try again later.")
         span.set_attribute("retry.exhausted", True)
         span.set_status(trace.StatusCode.ERROR, "retries exhausted")
         return False
