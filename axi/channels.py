@@ -86,7 +86,7 @@ def format_channel_topic(
         parts.append(f"session: {session_id}")
     if prompt_hash:
         parts.append(f"prompt_hash: {prompt_hash}")
-    if agent_type and agent_type != "flowcoder":
+    if agent_type and agent_type != config.get_default_agent_type():
         parts.append(f"type: {agent_type}")
     return " | ".join(parts)
 

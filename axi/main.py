@@ -13,7 +13,6 @@ import logging
 import os
 import re
 import signal
-import subprocess
 import sys
 import threading
 import time
@@ -363,9 +362,9 @@ async def on_message(message: discord.Message) -> None:
     async def _discord_stream_handler(s: AgentSession) -> str | None:
         return await agents.stream_response_to_channel(s, channel)
 
-    # Route through /soul or /soul-flow flowcharts
+    # Route through the configured FlowCoder wrapper, if any
     raw_content = content
-    content = agents.wrap_content_with_soul(content, session)
+    content = agents.wrap_content_with_flowchart(content, session)
 
     assert agents.hub is not None
     result = await receive_user_message(
@@ -374,7 +373,7 @@ async def on_message(message: discord.Message) -> None:
         content,
         _discord_stream_handler,
         # Discord-specific queue item format for process_message_queue
-        # 4th element is raw user text for display (content is /soul-wrapped)
+        # 4th element is raw user text for display (content may be flowchart-wrapped)
         queue_item=(content, channel, message, raw_content),
     )
 
@@ -852,7 +851,7 @@ async def claude_usage_command(interaction: discord.Interaction, history: int | 
 
 
 @bot.tree.command(name="model", description="Get or set the default LLM model for spawned agents.")
-@app_commands.describe(name="Model name (haiku, sonnet, opus) — omit to view current")
+@app_commands.describe(name="Model name (for example: opus, sonnet, haiku, gpt-5.4) — omit to view current")
 async def model_command(interaction: discord.Interaction, name: str | None = None) -> None:
     log.info("Slash command /model name=%s from %s", name, interaction.user)
 
@@ -865,7 +864,7 @@ async def model_command(interaction: discord.Interaction, name: str | None = Non
         if error:
             await interaction.response.send_message(f"*System:* {error}", ephemeral=True)
         else:
-            await interaction.response.send_message(f"*System:* Model set to **{name.lower()}**.")
+            await interaction.response.send_message(f"*System:* Model set to **{config.get_model()}**.")
 
 
 @bot.tree.command(name="list-agents", description="List all active agent sessions.")
@@ -2100,6 +2099,7 @@ def _register_agent_from_channel(channel: TextChannel, cwd: str) -> None:
 
     session = AgentSession(
         name=agent_name,
+        agent_type=config.get_default_agent_type(),
         client=None,
         cwd=cwd,
         system_prompt=prompt,
@@ -2376,7 +2376,7 @@ def _register_master_agent(resume_id: str | None, prompt_hash: str | None) -> Ag
         master_mcp["discord"] = tools.discord_mcp_server
     session = AgentSession(
         name=config.MASTER_AGENT_NAME,
-        agent_type="flowcoder",
+        agent_type=config.get_default_agent_type(),
         cwd=config.DEFAULT_CWD,
         system_prompt=MASTER_SYSTEM_PROMPT,
         system_prompt_hash=prompt_hash,
@@ -2602,12 +2602,28 @@ async def _spawn_crash_handler(crash_data: dict[str, Any], is_rollback: bool) ->
 # ---------------------------------------------------------------------------
 
 
+def _log_runtime_configuration() -> None:
+    """Log the resolved harness/model configuration without printing secrets."""
+    axi_model, claude_model_arg, runtime_env = config.get_resolved_model()
+    log.info(
+        "Runtime config: harness=%s model=%s claude_model_arg=%s effort=%s fc_wrap=%s proxy_base_url=%s proxy_model=%s",
+        config.get_harness(),
+        axi_model,
+        claude_model_arg or "<env>",
+        config.get_effort(),
+        config.get_fc_wrap() or "<off>",
+        runtime_env.get("ANTHROPIC_BASE_URL", "<none>"),
+        runtime_env.get("ANTHROPIC_MODEL", "<none>"),
+    )
+
+
 @bot.event
 async def on_ready() -> None:
     global _on_ready_fired
     set_agent_context("system")
     set_trigger("startup")
     log.info("Bot ready as %s", bot.user)
+    _log_runtime_configuration()
 
     asyncio.get_event_loop().set_exception_handler(_handle_task_exception)
 
@@ -2674,6 +2690,7 @@ async def on_ready() -> None:
 
         if config.HTTP_API_PORT:
             import uvicorn
+
             from axi.http_api import app as http_app
 
             uvi_config = uvicorn.Config(

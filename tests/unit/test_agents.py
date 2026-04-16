@@ -1,5 +1,9 @@
 """Unit tests for pure functions in agents.py and rate_limits.py."""
 
+import json
+from pathlib import Path
+from unittest.mock import patch
+
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -11,6 +15,7 @@ from axi.agents import (
     format_time_remaining,
     normalize_channel_name,
     split_message,
+    wrap_content_with_flowchart,
 )
 from axi.axi_types import AgentSession
 from axi.rate_limits import parse_rate_limit_seconds as _parse_rate_limit_seconds
@@ -76,6 +81,41 @@ class TestNormalizeChannelName:
     def test_truncation(self) -> None:
         long_name = "a" * 150
         assert len(normalize_channel_name(long_name)) == 100
+
+
+class TestFlowCoderWrapContent:
+    def test_wrap_disabled_returns_content(self) -> None:
+        session = AgentSession(name="test", agent_type="flowcoder", cwd="/tmp")
+
+        with patch.dict("os.environ", {"AXI_FC_WRAP": "off"}), patch("axi.config.FLOWCODER_ENABLED", True):
+            assert wrap_content_with_flowchart("hello", session) == "hello"
+
+    def test_generic_wrap_uses_configured_flowchart(self) -> None:
+        session = AgentSession(name="test", agent_type="flowcoder", cwd="/tmp")
+
+        with (
+            patch.dict("os.environ", {"AXI_FC_WRAP": "triage"}),
+            patch("axi.config.FLOWCODER_ENABLED", True),
+            patch("axi.agents._command_exists", return_value=True),
+        ):
+            assert wrap_content_with_flowchart("hello world", session) == "/triage 'hello world'"
+
+    def test_prompt_wrap_uses_bundled_command(self) -> None:
+        session = AgentSession(name="test", agent_type="flowcoder", cwd="/tmp")
+
+        with patch.dict("os.environ", {"AXI_FC_WRAP": "prompt"}), patch("axi.config.FLOWCODER_ENABLED", True):
+            assert wrap_content_with_flowchart("hello world", session) == "/prompt 'hello world'"
+
+
+class TestFlowCoderCommandDefinitions:
+    def test_prompt_command_is_passthrough(self) -> None:
+        repo_root = Path(__file__).resolve().parents[2]
+        command = json.loads((repo_root / "commands" / "prompt.json").read_text())
+
+        assert command["name"] == "prompt"
+        assert command["flowchart"]["start_block_id"] == "start"
+        assert command["flowchart"]["blocks"]["run-prompt"]["type"] == "prompt"
+        assert command["flowchart"]["blocks"]["run-prompt"]["prompt"] == "$1"
 
 
 class TestIsAwakeAndIsProcessing:

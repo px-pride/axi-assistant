@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+auth_json="${CODEX_AUTH_JSON:-$HOME/.codex/auth.json}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+shim_bin="${CODEX_CHATGPT_SHIM_BIN:-$script_dir/codex-chatgpt-openai-shim}"
+normalizer_bin="${ANTHROPIC_REQUEST_NORMALIZER_BIN:-$script_dir/anthropic-request-normalizer}"
+
+public_port="${PORT:-3000}"
+proxy_args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --port)
+      public_port="$2"
+      shift 2
+      ;;
+    --port=*)
+      public_port="${1#--port=}"
+      shift
+      ;;
+    *)
+      proxy_args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+internal_port="${ANTHROPIC_PROXY_INTERNAL_PORT:-$((public_port + 1))}"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "anthropic-proxy-codex: python3 is required to read $auth_json" >&2
+  exit 1
+fi
+
+if [[ ! -r "$auth_json" ]]; then
+  echo "anthropic-proxy-codex: cannot read $auth_json" >&2
+  exit 1
+fi
+
+codex_api_key="$(python3 - "$auth_json" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1]) as f:
+        data = json.load(f)
+except Exception as exc:
+    print(f"anthropic-proxy-codex: failed to read {sys.argv[1]}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+print(data.get("OPENAI_API_KEY") or "")
+PY
+)"
+if [[ -n "$codex_api_key" ]]; then
+  export UPSTREAM_BASE_URL="${UPSTREAM_BASE_URL:-https://api.openai.com}"
+  export UPSTREAM_API_KEY="${UPSTREAM_API_KEY:-$codex_api_key}"
+else
+  shim_port="${CODEX_CHATGPT_SHIM_PORT:-4057}"
+  shim_log="${CODEX_CHATGPT_SHIM_LOG:-/tmp/codex-chatgpt-openai-shim.log}"
+  export UPSTREAM_BASE_URL="${UPSTREAM_BASE_URL:-http://127.0.0.1:${shim_port}/v1}"
+  export UPSTREAM_API_KEY="${UPSTREAM_API_KEY:-codex-chatgpt-oauth}"
+fi
+export COMPLETION_MODEL="${COMPLETION_MODEL:-gpt-5.4}"
+export REASONING_MODEL="${REASONING_MODEL:-gpt-5.4}"
+export PORT="$internal_port"
+
+shim_pid=""
+proxy_pid=""
+cleanup() {
+  if [[ -n "${proxy_pid}" ]]; then
+    kill "${proxy_pid}" >/dev/null 2>&1 || true
+    wait "${proxy_pid}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${shim_pid}" ]]; then
+    kill "${shim_pid}" >/dev/null 2>&1 || true
+    wait "${shim_pid}" >/dev/null 2>&1 || true
+  fi
+}
+
+if [[ -z "$codex_api_key" ]]; then
+  if [[ ! -x "$shim_bin" ]]; then
+    echo "anthropic-proxy-codex: $shim_bin is required for ChatGPT login mode" >&2
+    exit 1
+  fi
+
+  if ! curl -fsS "http://127.0.0.1:${shim_port}/health" >/dev/null 2>&1; then
+    CODEX_AUTH_JSON="$auth_json" "$shim_bin" --port "$shim_port" >"$shim_log" 2>&1 &
+    shim_pid="$!"
+
+    for _ in $(seq 1 50); do
+      if curl -fsS "http://127.0.0.1:${shim_port}/health" >/dev/null 2>&1; then
+        break
+      fi
+      if ! kill -0 "$shim_pid" >/dev/null 2>&1; then
+        echo "anthropic-proxy-codex: shim exited during startup. Log: $shim_log" >&2
+        tail -n 20 "$shim_log" >&2 || true
+        exit 1
+      fi
+      sleep 0.1
+    done
+
+    if ! curl -fsS "http://127.0.0.1:${shim_port}/health" >/dev/null 2>&1; then
+      echo "anthropic-proxy-codex: shim did not become healthy on port $shim_port. Log: $shim_log" >&2
+      cleanup
+      exit 1
+    fi
+  fi
+
+  trap cleanup EXIT INT TERM
+fi
+
+if [[ ! -x "$normalizer_bin" ]]; then
+  echo "anthropic-proxy-codex: $normalizer_bin is required" >&2
+  exit 1
+fi
+
+anthropic-proxy "${proxy_args[@]}" --port "$internal_port" &
+proxy_pid="$!"
+
+for _ in $(seq 1 100); do
+  if curl -fsS "http://127.0.0.1:${internal_port}/v1/models" >/dev/null 2>&1; then
+    break
+  fi
+  if ! kill -0 "$proxy_pid" >/dev/null 2>&1; then
+    echo "anthropic-proxy-codex: inner proxy exited during startup" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+
+if ! curl -fsS "http://127.0.0.1:${internal_port}/v1/models" >/dev/null 2>&1; then
+  echo "anthropic-proxy-codex: inner proxy did not become healthy on port $internal_port" >&2
+  cleanup
+  exit 1
+fi
+
+"$normalizer_bin" --listen-port "$public_port" --target "http://127.0.0.1:${internal_port}"

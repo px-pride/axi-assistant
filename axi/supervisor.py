@@ -152,6 +152,23 @@ def ensure_default_files():
         (user_data / "schedule_history.json").write_text("[]\n")
 
 
+def child_env() -> dict[str, str]:
+    """Build the bot child environment, reloading .env on every launch."""
+    env = os.environ.copy()
+    env_path = DIR / ".env"
+    if not env_path.exists():
+        return env
+    try:
+        from dotenv import dotenv_values
+
+        for key, value in dotenv_values(env_path).items():
+            if value is not None:
+                env[key] = value
+    except Exception as exc:
+        log.warning("Failed to load %s for child environment: %s", env_path, exc)
+    return env
+
+
 def git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
@@ -184,6 +201,7 @@ def run_bot() -> int:
     proc = subprocess.Popen(
         ["uv", "run", "python", "-m", "axi.main"],
         cwd=DIR,
+        env=child_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )

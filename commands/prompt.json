@@ -1,0 +1,63 @@
+{
+  "id": "d2f3a893-c9f2-4fd1-a67f-225ca24b0f47",
+  "name": "prompt",
+  "description": "Pass-through wrapper that sends the provided message to the model as-is.",
+  "flowchart": {
+    "blocks": {
+      "start": {
+        "id": "start",
+        "type": "start",
+        "name": "START",
+        "position": { "x": 300, "y": 50 }
+      },
+      "run-prompt": {
+        "id": "run-prompt",
+        "type": "prompt",
+        "name": "PROMPT",
+        "position": { "x": 300, "y": 150 },
+        "prompt": "$1",
+        "output_schema": null,
+        "sound_effect": null
+      },
+      "end": {
+        "id": "end",
+        "type": "end",
+        "name": "END",
+        "position": { "x": 300, "y": 250 }
+      }
+    },
+    "connections": [
+      {
+        "id": "start-to-prompt",
+        "source_block_id": "start",
+        "target_block_id": "run-prompt",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      },
+      {
+        "id": "prompt-to-end",
+        "source_block_id": "run-prompt",
+        "target_block_id": "end",
+        "source_port": "bottom",
+        "target_port": "top",
+        "is_true_path": true,
+        "condition": null,
+        "label": null
+      }
+    ],
+    "start_block_id": "start"
+  },
+  "metadata": {
+    "created": "2026-04-16T00:00:00.000000",
+    "modified": "2026-04-16T00:00:00.000000",
+    "version": "1.0",
+    "author": null,
+    "tags": ["wrapper", "pass-through"]
+  },
+  "arguments": [
+    { "name": "message", "description": "Message to send to the model", "required": true }
+  ]
+}

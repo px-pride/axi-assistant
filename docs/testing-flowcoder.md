@@ -6,7 +6,7 @@ Flowcoder agents are a superset of Claude Code agents. They support normal conve
 
 ## Prerequisites
 
-- A test instance with `FLOWCODER_ENABLED=true` in `.env`
+- A test instance with `AXI_HARNESS=flowcoder` in `.env`
 - The `flowcoder-engine` binary available in the test instance's venv (installed via `pip install flowcoder`)
 - `CLAUDE_MODEL` set in `.env` (use `claude-haiku-4-5-20251001` for cheap testing)
 - Test guild configured in `~/.config/axi/test-config.json`
@@ -21,7 +21,7 @@ cd ~/axi-tests/<worktree>
 PYTHONPATH=. .venv/bin/python ../axi_test.py up <name> --wait
 
 # Add flowcoder config to the test instance .env
-echo 'FLOWCODER_ENABLED=true' >> ~/axi-tests/<name>/.env
+echo 'AXI_HARNESS=flowcoder' >> ~/axi-tests/<name>/.env
 echo 'CLAUDE_MODEL=claude-haiku-4-5-20251001' >> ~/axi-tests/<name>/.env
 
 # Restart to pick up .env changes
