@@ -157,7 +157,7 @@ _tracer = trace.get_tracer(__name__)
             },
             "model": {
                 "type": "string",
-                "description": "Model override for this agent (e.g. 'codex-mini', 'haiku', 'sonnet'). Defaults to global AXI_MODEL.",
+                "description": "Optional model override for this agent. Leave unset to use the default/global model. Only set this when the user explicitly requests a specific model.",
             },
         },
         "required": ["name", "prompt"],
