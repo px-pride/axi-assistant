@@ -945,21 +945,62 @@ async def claude_usage_command(interaction: discord.Interaction, history: int | 
     await interaction.response.send_message("\n".join(lines))
 
 
-@bot.tree.command(name="model", description="Get or set the default LLM model for spawned agents.")
+@bot.tree.command(name="model", description="Get or set the LLM model for this agent or future spawned agents.")
 @app_commands.describe(name="Model name (for example: opus, sonnet, haiku, gpt-5.4) — omit to view current")
 async def model_command(interaction: discord.Interaction, name: str | None = None) -> None:
     log.info("Slash command /model name=%s from %s", name, interaction.user)
 
-
     if name is None:
-        current = config.get_model()
-        await interaction.response.send_message(f"Current model: **{current}**")
-    else:
-        error = config.set_model(name)
-        if error:
-            await interaction.response.send_message(f"*System:* {error}", ephemeral=True)
+        agent_name = agents.channel_to_agent.get(interaction.channel_id or 0)
+        if agent_name == config.MASTER_AGENT_NAME:
+            agent_name = None
+        if agent_name and agent_name in agents.agents:
+            session = agents.agents[agent_name]
+            current = session.model or config.get_model()
+            await interaction.response.send_message(f"Current model for **{agent_name}**: **{current}**")
         else:
-            await interaction.response.send_message(f"*System:* Model set to **{config.get_model()}**.")
+            current = config.get_model()
+            await interaction.response.send_message(f"Current default model: **{current}**")
+        return
+
+    error = config.validate_model(name)
+    if error:
+        await interaction.response.send_message(f"*System:* {error}", ephemeral=True)
+        return
+
+    normalized = config.normalize_model(name)
+    agent_name = agents.channel_to_agent.get(interaction.channel_id or 0)
+    if agent_name == config.MASTER_AGENT_NAME:
+        agent_name = None
+    if agent_name and agent_name in agents.agents:
+        session = agents.agents[agent_name]
+        session.model = normalized
+        agent_cfg = agents._load_agent_config(agent_name)
+        saved_ext = agent_cfg.get("extensions")
+        agents._save_agent_config(
+            agent_name,
+            session.mcp_server_names,
+            extensions=saved_ext,
+            model=normalized,
+        )
+        await interaction.response.defer()
+        await agents.reset_session(agent_name)
+        await interaction.followup.send(
+            f"*System:* Agent **{agent_name}** switched to **{normalized}** and restarted with a fresh session."
+        )
+        channel = await agents.get_agent_channel(agent_name)
+        if channel is not None and channel.id != interaction.channel_id:
+            await agents.send_system(
+                channel,
+                f"Agent **{agent_name}** switched to **{normalized}** and restarted with a fresh session.",
+            )
+        return
+
+    error = config.set_model(normalized)
+    if error:
+        await interaction.response.send_message(f"*System:* {error}", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"*System:* Default model set to **{config.get_model()}**.")
 
 
 @bot.tree.command(name="list-agents", description="List all active agent sessions.")
@@ -1288,12 +1329,16 @@ async def kill_agent(interaction: discord.Interaction, agent_name: str | None = 
 
 
 @bot.tree.command(name="spawn", description="Spawn a new agent session with its own Discord channel.")
+@app_commands.describe(
+    model="Optional model override (for example: opus, sonnet, haiku, gpt-5.4)"
+)
 async def spawn_agent_cmd(
     interaction: discord.Interaction,
     name: str,
     prompt: str,
     cwd: str | None = None,
     resume: str | None = None,
+    model: str | None = None,
 ) -> None:
     log.info("Slash command /spawn %s from %s", name, interaction.user)
     if interaction.user.id not in config.ALLOWED_USER_IDS:
@@ -1317,6 +1362,13 @@ async def spawn_agent_cmd(
 
     default_cwd = os.path.join(config.AXI_USER_DATA, "agents", agent_name)
     agent_cwd = os.path.realpath(os.path.expanduser(cwd)) if cwd else default_cwd
+    agent_model = config.normalize_model(model) if model else None
+
+    if agent_model:
+        error = config.validate_model(agent_model)
+        if error:
+            await interaction.response.send_message(f"*System:* {error}", ephemeral=True)
+            return
 
     if not any(agent_cwd == d or agent_cwd.startswith(d + os.sep) for d in config.ALLOWED_CWDS):
         await interaction.response.send_message(
@@ -1330,7 +1382,7 @@ async def spawn_agent_cmd(
         try:
             if agent_name in agents.agents and resume:
                 await agents.reclaim_agent_name(agent_name)
-            await agents.spawn_agent(agent_name, agent_cwd, prompt, resume=resume)
+            await agents.spawn_agent(agent_name, agent_cwd, prompt, resume=resume, model=agent_model)
         except Exception:
             channels.bot_creating_channels.discard(channels.normalize_channel_name(agent_name))
             log.exception("Error in background spawn of agent '%s'", agent_name)
@@ -1343,8 +1395,9 @@ async def spawn_agent_cmd(
 
     channels.bot_creating_channels.add(channels.normalize_channel_name(agent_name))
     asyncio.create_task(_do_spawn())
+    model_suffix = f" using **{agent_model}**" if agent_model else ""
     await interaction.followup.send(
-        f"*System:* Spawning agent **{agent_name}** in `{agent_cwd}`..."
+        f"*System:* Spawning agent **{agent_name}** in `{agent_cwd}`{model_suffix}..."
     )
 
 

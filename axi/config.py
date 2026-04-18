@@ -62,8 +62,10 @@ __all__ = [
     "intents",
     "load_mcp_servers",
     "log",
+    "normalize_model",
     "set_model",
     "uses_chatgpt_proxy",
+    "validate_model",
 ]
 
 import json
@@ -402,6 +404,20 @@ def _normalize_model_selector(model: str) -> str:
     return LEGACY_MODEL_ALIASES.get(lower, model)
 
 
+def normalize_model(model: str) -> str:
+    return _normalize_model_selector(model)
+
+
+def validate_model(model: str) -> str:
+    normalized = _normalize_model_selector(model)
+    if not _is_valid_model_name(normalized):
+        return (
+            f"Invalid model '{model}'. Use a Claude alias like "
+            f"{', '.join(sorted(VALID_MODELS))} or a provider model ID like gpt-5.4."
+        )
+    return ""
+
+
 def _is_valid_model_name(model: str) -> bool:
     return bool(model and _MODEL_NAME_RE.fullmatch(model))
 
@@ -438,11 +454,11 @@ def get_model_runtime(model: str) -> tuple[str | None, dict[str, str]]:
     return resolved, {}
 
 
-def get_resolved_model() -> tuple[str, str | None, dict[str, str]]:
-    """Return the configured Axi model along with resolved Claude runtime settings."""
-    model = get_model()
-    resolved_model, env = get_model_runtime(model)
-    return model, resolved_model, env
+def get_resolved_model(model: str | None = None) -> tuple[str, str | None, dict[str, str]]:
+    """Return an Axi model along with resolved Claude runtime settings."""
+    resolved_input = get_model() if model is None else _normalize_model_selector(model)
+    resolved_model, env = get_model_runtime(resolved_input)
+    return resolved_input, resolved_model, env
 
 
 def _load_config() -> dict[str, Any]:
@@ -483,11 +499,9 @@ def get_model() -> str:
 def set_model(model: str) -> str:
     """Set the model preference. Returns validation error string or empty string on success."""
     normalized = _normalize_model_selector(model)
-    if not _is_valid_model_name(normalized):
-        return (
-            f"Invalid model '{model}'. Use a Claude alias like "
-            f"{', '.join(sorted(VALID_MODELS))} or a provider model ID like gpt-5.4."
-        )
+    error = validate_model(normalized)
+    if error:
+        return error
     with _config_lock:
         config = _load_config()
         config["model"] = normalized

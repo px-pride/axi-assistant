@@ -180,6 +180,11 @@ async def axi_spawn_agent(args: McpArgs) -> McpResult:
     excluded_commands: list[str] = args.get("excluded_commands") or []
     write_dirs: list[str] = [os.path.expanduser(d) for d in (args.get("write_dirs") or [])]
     agent_model: str | None = args.get("model")
+    if agent_model is not None:
+        agent_model = config.normalize_model(agent_model)
+        error = config.validate_model(agent_model)
+        if error:
+            return {"content": [{"type": "text", "text": f"Error: {error}"}], "is_error": True}
 
     # Respawn detection: if a channel already exists for this agent, it's a
     # respawn (kill + re-create).  Default cwd to the previous session's cwd

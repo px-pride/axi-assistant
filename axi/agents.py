@@ -1165,6 +1165,7 @@ async def _rebuild_session(name: str, *, cwd: str | None = None, session_id: str
     old_mcp_names = session.mcp_server_names if session else None
     old_excluded = session.extra_excluded_commands if session else []
     old_write_dirs = session.extra_write_dirs if session else []
+    old_model = session.model if session else None
     resolved_cwd = cwd or old_cwd
     prompt = (
         session.system_prompt if session and session.system_prompt else make_spawned_agent_system_prompt(resolved_cwd, agent_name=name)
@@ -1182,6 +1183,7 @@ async def _rebuild_session(name: str, *, cwd: str | None = None, session_id: str
         mcp_server_names=old_mcp_names,
         extra_excluded_commands=old_excluded,
         extra_write_dirs=old_write_dirs,
+        model=old_model,
     )
     new_session.session_id = session_id
     discord_state(new_session).channel_id = old_channel_id
@@ -1553,12 +1555,14 @@ async def restart_agent(name: str) -> AgentSession:
         await sleep_agent(session, force=True)
     agent_cfg = _load_agent_config(name)
     saved_ext = agent_cfg.get("extensions")
+    session.model = agent_cfg.get("model")
     new_prompt = make_spawned_agent_system_prompt(
         session.cwd, extensions=saved_ext, compact_instructions=session.compact_instructions, agent_name=name
     )
     session.system_prompt = new_prompt
     session.system_prompt_hash = compute_prompt_hash(new_prompt)
     session.session_id = session_id
+    _save_agent_config(name, session.mcp_server_names, extensions=saved_ext, model=session.model)
     discord_state(session).system_prompt_posted = False
     log.info("Agent '%s' restarted (session=%s)", name, session_id)
     return session
