@@ -278,6 +278,69 @@ def extract_tool_preview(tool_name: str, raw_json: str) -> str | None:
     return None
 
 
+async def _announce_agent_tool_use(
+    ctx: _StreamCtx,
+    channel: TextChannel,
+    tool_use_id: str | None,
+    tool_input: dict[str, Any] | None,
+) -> None:
+    """Post or enrich a top-level Agent tool invocation in Discord."""
+    if not tool_use_id:
+        return
+
+    payload = tool_input or {}
+    description = payload.get("description")
+    subagent_type = payload.get("subagent_type")
+    prefix_parts = ["`🔧 Agent"]
+    if subagent_type:
+        prefix_parts.append(f"{subagent_type}")
+    if description:
+        prefix_parts.append(f"— {description}")
+    prefix = " ".join(prefix_parts) + f" ({tool_use_id})`"
+    content = prefix
+    if payload:
+        body = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False)
+        content = f"{prefix}\n```json\n{body}\n```"
+
+    msg = ctx.agent_announcement_messages.get(tool_use_id)
+    if msg is None:
+        if tool_use_id in ctx.announced_agent_tool_uses:
+            return
+        ctx.announced_agent_tool_uses.add(tool_use_id)
+        if payload:
+            assert _send_long is not None
+            sent = await _send_long(channel, content)
+            if sent is not None:
+                ctx.agent_announcement_messages[tool_use_id] = sent
+        else:
+            sent = await _retry_discord_503(channel.send, content)
+            ctx.agent_announcement_messages[tool_use_id] = sent
+        return
+
+    if payload and msg.content != content:
+        if "```json" not in msg.content or len(content) > len(msg.content):
+            await _retry_discord_503(msg.edit, content=content)
+
+
+async def _upsert_task_status(
+    ctx: _StreamCtx,
+    channel: TextChannel,
+    task_id: str,
+    content: str,
+) -> None:
+    """Create or update the Discord message for one Agent task."""
+    if ctx.task_last_status_content.get(task_id) == content:
+        return
+
+    msg = ctx.task_status_messages.get(task_id)
+    if msg is None:
+        sent = await _retry_discord_503(channel.send, content)
+        ctx.task_status_messages[task_id] = sent
+    else:
+        await _retry_discord_503(msg.edit, content=content)
+    ctx.task_last_status_content[task_id] = content
+
+
 # ---------------------------------------------------------------------------
 # Stream context + helpers
 # ---------------------------------------------------------------------------
@@ -309,6 +372,8 @@ class _StreamCtx:
 
     __slots__ = (
         "active_tool_uses",
+        "agent_announcement_messages",
+        "announced_agent_tool_uses",
         "current_model",
         "deferred_msg",
         "flush_count",
@@ -323,6 +388,9 @@ class _StreamCtx:
         "live_edit",
         "msg_total",
         "suppress_stream",
+        "task_last_status_content",
+        "task_start_messages",
+        "task_status_messages",
         "text_buffer",
         "thinking_message",
         "tool_input_json",
@@ -332,6 +400,8 @@ class _StreamCtx:
     def __init__(self, live_edit: _LiveEditState | None = None) -> None:
         self.text_buffer: str = ""
         self.active_tool_uses: dict[str, tuple[str, float]] = {}
+        self.announced_agent_tool_uses: set[str] = set()
+        self.agent_announcement_messages: dict[str, discord.Message] = {}
         self.current_model: str | None = None
         self.got_result: bool = False  # True once a ResultMessage is received
         self.hit_rate_limit: bool = False
@@ -349,6 +419,9 @@ class _StreamCtx:
         self.last_flushed_channel_id: int | None = None
         self.last_flushed_content: str = ""  # Content of the last flushed message
         self.deferred_msg: str = ""  # Non-streaming: holds back the last message for timing append
+        self.task_start_messages: dict[str, discord.Message] = {}
+        self.task_status_messages: dict[str, discord.Message] = {}
+        self.task_last_status_content: dict[str, str] = {}
 
 
 async def _flush_text(ctx: _StreamCtx, session: AgentSession, channel: TextChannel, reason: str = "?") -> None:
@@ -595,6 +668,8 @@ async def _handle_stream_event(
             tool_name = block.get("name") or session.activity.tool_name or "unknown"
             if tool_use_id:
                 ctx.active_tool_uses[tool_use_id] = (tool_name, time.monotonic())
+            if tool_name == "Agent" and not msg.parent_tool_use_id:
+                await _announce_agent_tool_use(ctx, channel, tool_use_id, block.get("input"))
     elif event_type == "content_block_delta":
         delta = event.get("delta", {})
         if delta.get("type") == "input_json_delta":
@@ -730,20 +805,31 @@ async def _handle_assistant_message(
         ctx.text_buffer = ""
         await _hide_thinking(ctx)
 
+    for block in msg.content or []:
+        block_any: Any = block
+        if hasattr(block, "id") and hasattr(block, "name") and hasattr(block, "input"):
+            tool_use_id = getattr(block_any, "id", None)
+            tool_name = getattr(block_any, "name", None) or "unknown"
+            if tool_use_id and tool_use_id not in ctx.active_tool_uses:
+                ctx.active_tool_uses[tool_use_id] = (tool_name, time.monotonic())
+            if tool_name == "Agent" and not msg.parent_tool_use_id:
+                await _announce_agent_tool_use(
+                    ctx,
+                    channel,
+                    tool_use_id,
+                    getattr(block_any, "input", None),
+                )
+
     if session.agent_log:
         for block in msg.content or []:
             block_any: Any = block
             if hasattr(block, "text"):
                 session.agent_log.info("ASSISTANT: %s", block_any.text[:2000])
-            elif hasattr(block, "type") and block_any.type == "tool_use":
-                tool_use_id = getattr(block_any, "id", None)
-                tool_name = getattr(block_any, "name", None) or "unknown"
-                if tool_use_id and tool_use_id not in ctx.active_tool_uses:
-                    ctx.active_tool_uses[tool_use_id] = (tool_name, time.monotonic())
+            elif hasattr(block, "id") and hasattr(block, "name") and hasattr(block, "input"):
                 session.agent_log.info(
                     "TOOL_USE: %s(%s)",
                     block_any.name,
-                    json.dumps(block_any.input)[:500] if hasattr(block, "input") else "",
+                    json.dumps(block_any.input)[:500],
                 )
 
 
@@ -807,7 +893,67 @@ async def _handle_system_message(
     """Handle a SystemMessage during response streaming."""
     if session.agent_log:
         session.agent_log.debug("SYSTEM_MSG: subtype=%s data=%s", msg.subtype, json.dumps(msg.data)[:500])
-    if msg.subtype == "status" and msg.data.get("status") == "compacting":
+    if msg.subtype == "task_started":
+        if ctx is None:
+            return
+        task_id = str(msg.data.get("task_id") or "")
+        if not task_id:
+            return
+        description = msg.data.get("description") or "subagent"
+        task_type = msg.data.get("task_type") or "unknown"
+        tool_use_id = msg.data.get("tool_use_id") or "?"
+        content = f"`🔧 {task_type} — {description} ({tool_use_id})`\nStarted task `{task_id}`"
+        if task_id not in ctx.task_start_messages:
+            ctx.task_start_messages[task_id] = await _retry_discord_503(channel.send, content)
+
+    elif msg.subtype == "task_progress":
+        if ctx is None:
+            return
+        task_id = str(msg.data.get("task_id") or "")
+        if not task_id:
+            return
+        description = msg.data.get("description") or "subagent"
+        tool_use_id = msg.data.get("tool_use_id") or "?"
+        usage = msg.data.get("usage") if isinstance(msg.data.get("usage"), dict) else {}
+        tool_uses = usage.get("tool_uses", 0)
+        duration_ms = usage.get("duration_ms", 0)
+        total_tokens = usage.get("total_tokens", 0)
+        last_tool_name = msg.data.get("last_tool_name") or "?"
+        duration_s = duration_ms / 1000 if isinstance(duration_ms, (int, float)) else 0
+        content = (
+            f"`🔧 task progress — {description} ({tool_use_id})`\n"
+            f"Task `{task_id}` | {tool_uses} tools | {total_tokens} tokens | {duration_s:.1f}s | last tool: `{last_tool_name}`"
+        )
+        await _upsert_task_status(ctx, channel, task_id, content)
+
+    elif msg.subtype == "task_notification":
+        if ctx is None:
+            return
+        task_id = str(msg.data.get("task_id") or "")
+        if not task_id:
+            return
+        status = msg.data.get("status") or "unknown"
+        summary = msg.data.get("summary") or ""
+        output_file = msg.data.get("output_file") or ""
+        usage = msg.data.get("usage") if isinstance(msg.data.get("usage"), dict) else {}
+        tool_uses = usage.get("tool_uses")
+        duration_ms = usage.get("duration_ms")
+        details: list[str] = []
+        if tool_uses is not None:
+            details.append(f"tools={tool_uses}")
+        if isinstance(duration_ms, (int, float)):
+            details.append(f"duration={duration_ms / 1000:.1f}s")
+        if output_file:
+            details.append(f"output=`{output_file}`")
+        details_str = " | ".join(details)
+        content = f"`🔧 task {status} ({task_id})`"
+        if summary:
+            content += f"\n{summary}"
+        if details_str:
+            content += f"\n{details_str}"
+        await _upsert_task_status(ctx, channel, task_id, content)
+
+    elif msg.subtype == "status" and msg.data.get("status") == "compacting":
         # Set compacting flag — prevents interrupts during compaction
         session.compacting = True
         # CLI signals compaction is starting — only notify if we didn't trigger it ourselves
