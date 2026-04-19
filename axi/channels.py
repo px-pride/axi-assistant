@@ -36,6 +36,12 @@ _tracer = trace.get_tracer(__name__)
 _bot: Bot | None = None
 target_guild: discord.Guild | None = None
 axi_categories: list[CategoryChannel] = []
+# In combined mode, `combined_categories` is the strict target for new channels
+# and migrations (combined primary + overflow only — NOT legacy Axi/Active).
+# `axi_categories` in combined mode may additionally hold surviving legacy
+# categories for lookup/search, but new channels must land in combined_categories.
+# In non-combined mode, combined_categories stays empty.
+combined_categories: list[CategoryChannel] = []
 active_categories: list[CategoryChannel] = []
 killed_categories: list[CategoryChannel] = []
 bot_creating_channels: set[str] = set()
@@ -313,7 +319,7 @@ def _match_category_group(cat_name: str, base_name: str) -> int | None:
 
 async def ensure_guild_infrastructure() -> None:
     """Ensure the guild has Axi, Active, and Killed categories (with overflow). Called once during on_ready()."""
-    global target_guild, axi_categories, active_categories, killed_categories
+    global target_guild, axi_categories, combined_categories, active_categories, killed_categories
     assert _bot is not None
     _tracer.start_span("ensure_guild_infrastructure", attributes={"discord.guild_id": str(config.DISCORD_GUILD_ID)}).end()
 
@@ -427,12 +433,80 @@ async def ensure_guild_infrastructure() -> None:
                 await ch.edit(sync_permissions=True)
                 log.info("Synced permissions on channel #%s in '%s'", ch.name, cat.name)
 
+    # Combine-categories migration: in combined mode, move any channels left
+    # in legacy AXI_CATEGORY_NAME / ACTIVE_CATEGORY_NAME categories into the
+    # combined category (with overflow as needed), then delete the empty
+    # legacy shells. This is what the env var AXI_COMBINE_LIVE_CATEGORIES
+    # actually promises — combination, not just discovery.
+    combined_cats_list: list[CategoryChannel] = []
+    if config.COMBINE_LIVE_CATEGORIES:
+        axi_found.sort(key=lambda x: x[0])
+        legacy_cats: list[CategoryChannel] = []
+        for _, cat in axi_found:
+            if _match_category_group(cat.name, config.COMBINED_CATEGORY_NAME) is not None:
+                combined_cats_list.append(cat)
+            else:
+                legacy_cats.append(cat)
+
+        if legacy_cats:
+            legacy_names_log = ", ".join(c.name for c in legacy_cats)
+            total_channels = sum(len(c.text_channels) for c in legacy_cats)
+            log.info(
+                "Combine-categories migration: moving %d channel(s) from legacy category(s) [%s] into '%s'",
+                total_channels, legacy_names_log, config.COMBINED_CATEGORY_NAME,
+            )
+
+        for legacy_cat in legacy_cats:
+            for ch in list(legacy_cat.text_channels):
+                dest = await _get_category_with_room(combined_cats_list, config.COMBINED_CATEGORY_NAME)
+                try:
+                    # end=True required by discord.py's Move API. Master
+                    # channel position is enforced separately via
+                    # ensure_master_channel_position after startup.
+                    await ch.move(category=dest, end=True, sync_permissions=True)
+                    log.info(
+                        "Migrated channel #%s from legacy '%s' to '%s'",
+                        ch.name, legacy_cat.name, dest.name,
+                    )
+                except (discord.HTTPException, ValueError) as e:
+                    log.warning(
+                        "Failed to migrate #%s from '%s' to '%s': %s",
+                        ch.name, legacy_cat.name, dest.name, e,
+                    )
+                # Rate-limit safety: Discord caps channel moves.
+                await asyncio.sleep(0.1)
+
+        surviving_legacy: list[CategoryChannel] = []
+        for legacy_cat in legacy_cats:
+            if not legacy_cat.text_channels:
+                try:
+                    await legacy_cat.delete(reason="Combine-categories migration: empty legacy category")
+                    log.info("Deleted empty legacy category '%s'", legacy_cat.name)
+                except discord.HTTPException as e:
+                    log.warning("Failed to delete legacy category '%s': %s", legacy_cat.name, e)
+                    surviving_legacy.append(legacy_cat)
+            else:
+                log.warning(
+                    "Legacy category '%s' still has %d channel(s) after migration — kept as fallback",
+                    legacy_cat.name, len(legacy_cat.text_channels),
+                )
+                surviving_legacy.append(legacy_cat)
+
+        # Rebuild axi_found with combined (primary + any overflow created
+        # during migration) followed by any surviving legacy as fallback.
+        axi_found = []
+        for idx, cat in enumerate(combined_cats_list):
+            axi_found.append((idx + 1, cat))
+        for idx, legacy_cat in enumerate(surviving_legacy):
+            axi_found.append((_LEGACY_ORDER_BIAS + idx + 1, legacy_cat))
+
     # Sort by order number and store
     axi_found.sort(key=lambda x: x[0])
     active_found.sort(key=lambda x: x[0])
     killed_found.sort(key=lambda x: x[0])
 
     axi_categories = [cat for _, cat in axi_found]
+    combined_categories = combined_cats_list
     active_categories = [cat for _, cat in active_found]
     killed_categories = [cat for _, cat in killed_found]
 
@@ -462,7 +536,13 @@ async def ensure_agent_channel(agent_name: str, cwd: str | None = None) -> TextC
 
     if config.COMBINE_LIVE_CATEGORIES:
         is_axi = True
-        target_group = axi_categories
+        # Strict target: combined primary + overflow only. This EXCLUDES any
+        # surviving legacy categories from axi_categories so the
+        # `ch.category_id not in target_group_ids` check below correctly
+        # triggers a migration move for any leftover channels that arrive
+        # post-startup (safety net behind ensure_guild_infrastructure's
+        # batch migration).
+        target_group = combined_categories
         target_base_name = config.COMBINED_CATEGORY_NAME
     else:
         is_axi = agent_name == config.MASTER_AGENT_NAME or _is_axi_cwd(cwd)
