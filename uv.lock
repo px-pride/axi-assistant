@@ -281,7 +281,7 @@ requires-dist = [
     { name = "agenthub", editable = "packages/agenthub" },
     { name = "arrow" },
     { name = "claude-agent-sdk" },
-    { name = "claudewire", git = "https://github.com/px-pride/claudewire.git?subdirectory=py&rev=d29f537d7449158fb92ad2d8fdf50bde2dcd5d6c" },
+    { name = "claudewire", git = "https://github.com/leroux/claudewire.git?subdirectory=py&rev=1f940d89e1a1db8217f997f9dc77063a3738fd36" },
     { name = "croniter" },
     { name = "discord-py", extras = ["voice"], specifier = ">=2.7" },
     { name = "discordquery", editable = "packages/discordquery" },
@@ -405,7 +405,7 @@ wheels = [
 [[package]]
 name = "claudewire"
 version = "0.1.0"
-source = { git = "https://github.com/px-pride/claudewire.git?subdirectory=py&rev=d29f537d7449158fb92ad2d8fdf50bde2dcd5d6c#d29f537d7449158fb92ad2d8fdf50bde2dcd5d6c" }
+source = { git = "https://github.com/leroux/claudewire.git?subdirectory=py&rev=1f940d89e1a1db8217f997f9dc77063a3738fd36#1f940d89e1a1db8217f997f9dc77063a3738fd36" }
 dependencies = [
     { name = "opentelemetry-api" },
     { name = "pydantic" },
