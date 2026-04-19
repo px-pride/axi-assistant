@@ -20,6 +20,8 @@ __all__ = [
     "BRIDGE_SOCKET_PATH",
     "CHANNEL_STATUS_ENABLED",
     "CLEAN_TOOL_MESSAGES",
+    "COMBINED_CATEGORY_NAME",
+    "COMBINE_LIVE_CATEGORIES",
     "CONFIG_PATH",
     "CRASH_ANALYSIS_MARKER_PATH",
     "DAY_BOUNDARY_HOUR",
@@ -555,9 +557,11 @@ INTERRUPT_TIMEOUT = 15  # seconds to wait after interrupt
 API_ERROR_MAX_RETRIES = 3
 API_ERROR_BASE_DELAY = 5  # seconds, doubles each retry
 
-ACTIVE_CATEGORY_NAME = "Active"
-AXI_CATEGORY_NAME = "Axi"
-KILLED_CATEGORY_NAME = "Killed"
+ACTIVE_CATEGORY_NAME = os.environ.get("AXI_ACTIVE_CATEGORY_NAME", "Active")
+AXI_CATEGORY_NAME = os.environ.get("AXI_CATEGORY_NAME", "Axi")
+KILLED_CATEGORY_NAME = os.environ.get("AXI_KILLED_CATEGORY_NAME", "Killed")
+COMBINE_LIVE_CATEGORIES = os.environ.get("AXI_COMBINE_LIVE_CATEGORIES", "0") == "1"
+COMBINED_CATEGORY_NAME = os.environ.get("AXI_COMBINED_CATEGORY_NAME", AXI_CATEGORY_NAME)
 
 # ---------------------------------------------------------------------------
 # Discord REST API client

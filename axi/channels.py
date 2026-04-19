@@ -339,11 +339,20 @@ async def ensure_guild_infrastructure() -> None:
     active_found: list[tuple[int, CategoryChannel]] = []
     killed_found: list[tuple[int, CategoryChannel]] = []
 
-    group_map = [
-        (config.AXI_CATEGORY_NAME, axi_found),
-        (config.ACTIVE_CATEGORY_NAME, active_found),
-        (config.KILLED_CATEGORY_NAME, killed_found),
-    ]
+    # When combined, all live agents share one category (named by
+    # COMBINED_CATEGORY_NAME, defaulting to AXI_CATEGORY_NAME). The Active
+    # group is skipped entirely — active_categories stays empty.
+    if config.COMBINE_LIVE_CATEGORIES:
+        group_map = [
+            (config.COMBINED_CATEGORY_NAME, axi_found),
+            (config.KILLED_CATEGORY_NAME, killed_found),
+        ]
+    else:
+        group_map = [
+            (config.AXI_CATEGORY_NAME, axi_found),
+            (config.ACTIVE_CATEGORY_NAME, active_found),
+            (config.KILLED_CATEGORY_NAME, killed_found),
+        ]
 
     for cat in guild.categories:
         for base_name, found_list in group_map:
@@ -385,7 +394,7 @@ async def ensure_guild_infrastructure() -> None:
     killed_categories = [cat for _, cat in killed_found]
 
     assert axi_categories
-    assert active_categories
+    assert active_categories or config.COMBINE_LIVE_CATEGORIES
     assert killed_categories
 
 
@@ -408,9 +417,14 @@ async def ensure_agent_channel(agent_name: str, cwd: str | None = None) -> TextC
     _tracer.start_span("ensure_agent_channel", attributes={"agent.name": agent_name}).end()
     normalized = normalize_channel_name(agent_name)
 
-    is_axi = agent_name == config.MASTER_AGENT_NAME or _is_axi_cwd(cwd)
-    target_group = axi_categories if is_axi else active_categories
-    target_base_name = config.AXI_CATEGORY_NAME if is_axi else config.ACTIVE_CATEGORY_NAME
+    if config.COMBINE_LIVE_CATEGORIES:
+        is_axi = True
+        target_group = axi_categories
+        target_base_name = config.COMBINED_CATEGORY_NAME
+    else:
+        is_axi = agent_name == config.MASTER_AGENT_NAME or _is_axi_cwd(cwd)
+        target_group = axi_categories if is_axi else active_categories
+        target_base_name = config.AXI_CATEGORY_NAME if is_axi else config.ACTIVE_CATEGORY_NAME
     target_group_ids = {cat.id for cat in target_group}
 
     # Search live categories (all Axi + all Active) for existing channel
