@@ -29,6 +29,22 @@ DEFAULT_WIRE_LOG_PATH = os.path.join(
     "discord-wire.jsonl",
 )
 
+# Read once at import: ENABLE_WIRE_LOG=0 disables. axi.config imports this module,
+# so we cannot import config here without a cycle; keep the env read inline.
+_ENABLE_WIRE_LOG = os.environ.get("ENABLE_WIRE_LOG", "1").lower() in ("1", "true", "yes")
+_MAX_WIRE_LOG_BYTES = 10 * 1024 * 1024
+_WIRE_LOG_BACKUP_COUNT = 5
+
+
+def _rotate_wire_log(path: str) -> None:
+    for i in range(_WIRE_LOG_BACKUP_COUNT - 1, 0, -1):
+        src = f"{path}.{i}"
+        dst = f"{path}.{i + 1}"
+        if os.path.exists(src):
+            os.replace(src, dst)
+    if os.path.exists(path):
+        os.replace(path, f"{path}.1")
+
 
 class DiscordAttachmentMeta(BaseModel):
     filename: str | None = None
@@ -107,10 +123,18 @@ class DiscordWireLogger:
         )
 
     def append(self, event: DiscordWireEvent) -> None:
+        if not _ENABLE_WIRE_LOG:
+            return
         try:
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
-            with self._lock, open(self.path, "a", encoding="utf-8") as f:
-                f.write(event.model_dump_json() + "\n")
+            with self._lock:
+                try:
+                    if os.path.getsize(self.path) >= _MAX_WIRE_LOG_BYTES:
+                        _rotate_wire_log(self.path)
+                except FileNotFoundError:
+                    pass
+                with open(self.path, "a", encoding="utf-8") as f:
+                    f.write(event.model_dump_json() + "\n")
         except Exception:
             log.warning("Failed to append Discord wire event", exc_info=True)
 
