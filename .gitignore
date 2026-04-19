@@ -1,86 +1,59 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
+# INVERTED / ALLOWLIST-STYLE GITIGNORE
+#
+# This gitignore is inverted: everything is ignored by default, and only
+# explicitly-allowlisted paths are eligible to be tracked. The goal is
+# to minimize the risk of a rogue agent (or human) accidentally staging
+# sensitive data, runtime state, build artifacts, or personal scratch
+# files.
+#
+# To track a new top-level path, add a `!/name` negation below. To add
+# a tracked file inside an otherwise-ignored subtree (like .claude/),
+# negate each parent directory first, then the target.
 
-# Virtual environment
-.venv/
+# --- Ignore everything at the repo root ---
+/*
 
-# Environment variables
-.env
+# --- Allowlisted top-level directories ---
+!/.github/
+!/axi/
+!/bin/
+!/commands/
+!/docs/
+!/extensions/
+!/packages/
+!/prompts/
+!/scripts/
+!/tests/
 
-# uv
-.python-version
+# --- Allowlisted top-level files ---
+!/.env.template
+!/.gitignore
+!/.pre-commit-config.yaml
+!/README.md
+!/axi-bot.service
+!/axi-procmux.service
+!/axi-test@.service
+!/axi_test.py
+!/docker-compose.yml
+!/pyproject.toml
+!/pyrightconfig.json
+!/pytest.ini
+!/ruff.toml
+!/uv.lock
 
-# IDE
-.vscode/
-.idea/
+# --- .claude/: track only commands/, hide runtime state ---
+!/.claude/
+/.claude/*
+!/.claude/commands/
 
-# Rust
-axi-rs/target/
+# --- Build / cache artifacts anywhere in the tree ---
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+**/.venv/
+**/dist/
+**/build/
+**/target/
 
-# OS
-.DS_Store
-
-# User data
-profile/
-TODOS.md
-USER_INFO_RAW.md
-schedules.json
-schedule_skips.json
-schedule_history.json
-agent_history.json
-server_log.jsonl
-projects/
-personal/
-
-# Instance-specific files (gitignored, loaded into system prompt at runtime)
-CLAUDE.md
-PLAN.md
-USER_PROFILE.md
-nova_instructions.md
-test_instructions.md
-
-# Record-handler working directory
-record-handler/
-
-# LLM cache
-.llm_cache/
-
-# Test / runtime artifacts
-.hypothesis/
-.master_session_id
-
-# Runtime signals and state
-.restart_requested
-.rollback_performed
-.crash_analysis
-.crash_log_snapshot
-.active_sessions
-.bot_output.log
-.supervisor.out
-.bridge.log
-.bot.lock
-.merge-queue.json
-.merge-queue.lock
-.merge-exec.lock
-logs/
-config.json
-
-# Sandbox artifacts (devnull device nodes injected by Claude Code sandbox)
-.bash_profile
-.bashrc
-.gitconfig
-.gitmodules
-.mcp.json
-.profile
-.ripgreprc
-.zprofile
-.zshrc
-HEAD
-config
-hooks
-objects
-refs
+# --- Explicit exclusions inside allowlisted directories ---
+/scripts/replay_minflow_ops.py
