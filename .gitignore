@@ -41,10 +41,11 @@
 !/ruff.toml
 !/uv.lock
 
-# --- .claude/: track only commands/, hide runtime state ---
+# --- .claude/: track commands/ and skills/, hide runtime state ---
 !/.claude/
 /.claude/*
 !/.claude/commands/
+!/.claude/skills/
 
 # --- Build / cache artifacts anywhere in the tree ---
 **/__pycache__/
