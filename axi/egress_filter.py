@@ -6,8 +6,12 @@ Also provides path-based access control for file reads and uploads.
 from __future__ import annotations
 
 import fnmatch
+import logging
 import os
 import re
+from collections.abc import Iterable
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Secret patterns
@@ -85,6 +89,120 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 # ---------------------------------------------------------------------------
+# Literal secret allowlist (loaded from .env files at startup/agent-spawn)
+# ---------------------------------------------------------------------------
+# Exact secret values discovered by scanning .env files. Replaced verbatim in
+# scrub_secrets() before regex patterns so prose like ``DB password: <value>``
+# gets caught even when the value is short or unquoted.
+
+_LITERAL_SECRETS: set[str] = set()
+_MIN_SECRET_LEN = 8
+
+
+def register_literal_secrets(values: Iterable[str]) -> int:
+    """Register exact secret values to scrub from outgoing text.
+
+    Empty strings and values shorter than ``_MIN_SECRET_LEN`` are skipped to
+    avoid mass-redacting common tokens like ``"true"`` or ``"localhost"``.
+    Returns the number of values newly added.
+    """
+    added = 0
+    for v in values:
+        if not v or len(v) < _MIN_SECRET_LEN:
+            continue
+        if v not in _LITERAL_SECRETS:
+            _LITERAL_SECRETS.add(v)
+            added += 1
+    return added
+
+
+def _scrub_literals(text: str) -> str:
+    """Replace registered literal secrets in *text*.
+
+    Iterates longest-first so a value that contains another value as a
+    substring is replaced before the shorter substring would clobber it.
+    """
+    if not _LITERAL_SECRETS:
+        return text
+    for value in sorted(_LITERAL_SECRETS, key=len, reverse=True):
+        if value in text:
+            text = text.replace(value, "[REDACTED:secret]")
+    return text
+
+
+# ---------------------------------------------------------------------------
+# .env scanner
+# ---------------------------------------------------------------------------
+
+_ENV_SCAN_SKIP_DIRS = {".venv", "venv", "node_modules", ".git", "target", "__pycache__", "dist", "build"}
+_ENV_SCAN_SKIP_FILES = {".env.example", ".env.template", ".env.sample", ".env.dist"}
+# Only files whose basename matches this regex are parsed.
+# Matches .env, .env.local, .env.production, etc.
+_ENV_FILE_RE = re.compile(r"^\.env(\..+)?$")
+# KEY=VALUE line. KEY is alphanumeric/underscore. Allows leading "export ".
+_ENV_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
+
+
+def _strip_quotes(value: str) -> str:
+    """Strip a single matching pair of surrounding single or double quotes."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
+
+
+def _parse_env_file(path: str) -> set[str]:
+    """Parse a .env file and return the set of values found."""
+    values: set[str] = set()
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.rstrip("\n").rstrip("\r")
+                if not line.strip() or line.lstrip().startswith("#"):
+                    continue
+                m = _ENV_LINE_RE.match(line)
+                if not m:
+                    continue
+                value = _strip_quotes(m.group(2))
+                if value:
+                    values.add(value)
+    except OSError as e:
+        log.warning("egress_filter: failed to read %s: %s", path, e)
+    return values
+
+
+def scan_env_files(root: str) -> set[str]:
+    """Recursively scan *root* for .env files and return the union of their values.
+
+    Skips common build/dependency dirs and example/template .env files. Returns
+    an empty set if *root* is missing or unreadable.
+    """
+    values: set[str] = set()
+    if not root or not os.path.isdir(root):
+        return values
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _ENV_SCAN_SKIP_DIRS]
+        for fname in filenames:
+            if fname in _ENV_SCAN_SKIP_FILES:
+                continue
+            if not _ENV_FILE_RE.match(fname):
+                continue
+            values.update(_parse_env_file(os.path.join(dirpath, fname)))
+    return values
+
+
+def register_secrets_from_dir(root: str) -> int:
+    """Scan *root* for .env files and register their values as literal secrets.
+
+    Returns the number of newly registered values.
+    """
+    values = scan_env_files(root)
+    added = register_literal_secrets(values)
+    if added:
+        log.info("egress_filter: registered %d literal secret(s) from %s", added, root)
+    return added
+
+
+# ---------------------------------------------------------------------------
 # Discord snowflake ID filtering
 # ---------------------------------------------------------------------------
 # Known guild and channel IDs loaded at init time. These are replaced with
@@ -113,6 +231,9 @@ def scrub_secrets(text: str) -> str:
     """Replace known secret patterns and registered snowflake IDs in *text*."""
     if not text:
         return text
+    # Literal secrets first: known exact values from .env files. Done before
+    # regex so we never mangle a known secret that partially matches a pattern.
+    text = _scrub_literals(text)
     for pattern, replacement in _PATTERNS:
         text = pattern.sub(replacement, text)
     if _SNOWFLAKE_REPLACEMENTS:

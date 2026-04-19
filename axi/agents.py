@@ -1172,6 +1172,11 @@ async def reconstruct_agents_from_channels() -> int:
                 log.debug("No cwd in topic for channel #%s, skipping", agent_name)
                 continue
 
+            # Re-scan cwd for .env values on restart so the literal-secret
+            # allowlist is rebuilt for every reconstructed agent.
+            from axi.egress_filter import register_secrets_from_dir
+            register_secrets_from_dir(cwd)
+
             agent_cfg = _load_agent_config(agent_name)
             saved_ext = agent_cfg.get("extensions")  # None = use defaults
             saved_model: str | None = agent_cfg.get("model")  # None = use global AXI_MODEL
@@ -1547,6 +1552,12 @@ async def spawn_agent(
         },
     ):
         os.makedirs(cwd, exist_ok=True)
+
+        # Scan the agent's cwd for .env values so we can scrub them from any
+        # outgoing message before they reach Discord. Done before any prompt
+        # send so the spawn-system message itself can be scrubbed.
+        from axi.egress_filter import register_secrets_from_dir
+        register_secrets_from_dir(cwd)
 
         set_agent_context(name)
         set_trigger("spawn", detail=f"type={agent_type}")

@@ -2459,6 +2459,13 @@ def _register_egress_snowflakes(bot: discord.Client) -> None:
         log.info("Egress filter: registered %d snowflake IDs", len(ids))
 
 
+def _register_egress_startup_secrets() -> None:
+    """Scan the bot's repo root for .env files and register their values."""
+    from axi.egress_filter import register_secrets_from_dir
+
+    register_secrets_from_dir(config.BOT_DIR)
+
+
 async def _setup_guild_infrastructure(master_session: AgentSession) -> None:
     """Set up Discord guild categories and master channel."""
     try:
@@ -2711,6 +2718,8 @@ async def on_ready() -> None:
 
         # Register known Discord snowflake IDs for egress filtering
         _register_egress_snowflakes(bot)
+        # Scan our own repo root for .env values to scrub from outgoing text
+        _register_egress_startup_secrets()
 
         _startup_t0 = time.monotonic()
         master_ch = await agents.get_master_channel()
