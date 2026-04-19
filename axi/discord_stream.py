@@ -208,9 +208,26 @@ _pending_compact: dict[str, dict[str, int | float]] = {}  # agent name -> {"pre_
 
 
 async def _receive_response_safe(session: AgentSession) -> AsyncIterator[Any]:
-    """Wrapper around receive_messages() that handles unknown message types."""
-    assert session.client is not None
-    assert session.client._query is not None  # pyright: ignore[reportPrivateUsage]
+    """Wrapper around receive_messages() that handles unknown message types.
+
+    Returns without yielding if session.client has been cleared (agent killed
+    mid-stream, e.g. by force-kill during retry delay). The caller's post-loop
+    "no ResultMessage" branch handles cleanup — previously this was an
+    assertion and crashed with AssertionError in stream_with_retry's retry
+    path when force-kill nulled session.client between attempts.
+    """
+    if session.client is None:
+        log.warning(
+            "STREAM[%s] receive called with client=None — agent was killed mid-stream, bailing out",
+            session.name,
+        )
+        return
+    if session.client._query is None:  # pyright: ignore[reportPrivateUsage]
+        log.warning(
+            "STREAM[%s] receive called with client._query=None — client not fully initialized, bailing out",
+            session.name,
+        )
+        return
     async for data in session.client._query.receive_messages():  # pyright: ignore[reportPrivateUsage]
         try:
             parsed = parse_message(data)
@@ -1419,8 +1436,24 @@ async def stream_with_retry(session: AgentSession, channel: TextChannel) -> bool
             )
             await asyncio.sleep(delay)
 
+            # Session may have been killed during the retry delay (force-kill
+            # from a queued interrupt, or sleep_agent from another path).
+            # Bail out cleanly rather than calling .query() / receive on a
+            # dead client — the next user message triggers a fresh wake.
+            if session.client is None:
+                log.warning(
+                    "RETRY_ABORT[%s] client=None after %ds delay — agent killed during retry; bailing out",
+                    session.name,
+                    delay,
+                )
+                await _retry_discord_503(
+                    channel.send,
+                    f"\u26a0\ufe0f Agent **{session.name}** was killed mid-retry; send another message to continue.",
+                )
+                span.set_attribute("retry.aborted", True)
+                return False
+
             try:
-                assert session.client is not None
                 get_stdio_logger(session.name, config.LOG_DIR).debug(
                     ">>> STDIN  %s", json.dumps({"type": "retry", "content": "Continue from where you left off."})
                 )

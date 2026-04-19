@@ -342,39 +342,82 @@ async def ensure_guild_infrastructure() -> None:
     # When combined, all live agents share one category (named by
     # COMBINED_CATEGORY_NAME, defaulting to AXI_CATEGORY_NAME). The Active
     # group is skipped entirely — active_categories stays empty.
+    #
+    # In combined mode we also discover pre-existing categories matching
+    # AXI_CATEGORY_NAME and ACTIVE_CATEGORY_NAME (when they differ from the
+    # combined name) so channels left behind from a previous non-combined
+    # config are still visible to channel lookup and agent reconstruction.
+    # These legacy entries are discover-only — we do NOT create them if they
+    # don't exist; new channels always go to COMBINED_CATEGORY_NAME.
+    # Each tuple: (base_name, found_list, create_if_missing)
     if config.COMBINE_LIVE_CATEGORIES:
-        group_map = [
-            (config.COMBINED_CATEGORY_NAME, axi_found),
-            (config.KILLED_CATEGORY_NAME, killed_found),
+        group_map: list[tuple[str, list[tuple[int, CategoryChannel]], bool]] = [
+            (config.COMBINED_CATEGORY_NAME, axi_found, True),
         ]
+        legacy_names: list[str] = []
+        if config.AXI_CATEGORY_NAME != config.COMBINED_CATEGORY_NAME:
+            legacy_names.append(config.AXI_CATEGORY_NAME)
+        if (
+            config.ACTIVE_CATEGORY_NAME != config.COMBINED_CATEGORY_NAME
+            and config.ACTIVE_CATEGORY_NAME != config.AXI_CATEGORY_NAME
+        ):
+            legacy_names.append(config.ACTIVE_CATEGORY_NAME)
+        group_map.extend((name, axi_found, False) for name in legacy_names)
+        group_map.append((config.KILLED_CATEGORY_NAME, killed_found, True))
     else:
         group_map = [
-            (config.AXI_CATEGORY_NAME, axi_found),
-            (config.ACTIVE_CATEGORY_NAME, active_found),
-            (config.KILLED_CATEGORY_NAME, killed_found),
+            (config.AXI_CATEGORY_NAME, axi_found, True),
+            (config.ACTIVE_CATEGORY_NAME, active_found, True),
+            (config.KILLED_CATEGORY_NAME, killed_found, True),
         ]
 
+    # Deduplicate by category id — same category can be matched by multiple
+    # base names if configuration aliases (e.g. combined==axi). Legacy
+    # entries in combined mode get a large order bias so they sort AFTER
+    # the combined primary — ensures new channels go to the combined
+    # category first (_get_category_with_room scans list order).
+    _LEGACY_ORDER_BIAS = 10000
+    seen_cat_ids: set[int] = set()
+    # Track which base_names were discovered so we can decide per-base whether
+    # to create the primary. Can't use "found_list is empty" because combined
+    # mode shares one list across multiple base_names (combined + legacy).
+    primary_found: set[str] = set()
     for cat in guild.categories:
-        for base_name, found_list in group_map:
+        for base_name, found_list, create in group_map:
             order = _match_category_group(cat.name, base_name)
             if order is not None:
-                found_list.append((order, cat))
+                if cat.id in seen_cat_ids:
+                    break
+                seen_cat_ids.add(cat.id)
+                sort_order = order if create else order + _LEGACY_ORDER_BIAS
+                found_list.append((sort_order, cat))
+                if order == 1:
+                    primary_found.add(base_name)
                 break
 
-    # Ensure primary exists for each group; sync permissions on all
-    for base_name, found_list in group_map:
+    # Ensure primary exists for each group (where create=True); sync permissions on all.
+    # Legacy discover-only entries (combined mode's AXI/ACTIVE) skip creation but still
+    # get permission sync so existing channels inherit correct access.
+    for base_name, found_list, create_if_missing in group_map:
         desired = killed_overwrites if base_name == config.KILLED_CATEGORY_NAME else overwrites
-        if not found_list:
-            cat = await guild.create_category(base_name, overwrites=desired)
-            found_list.append((1, cat))
-            log.info("Created '%s' category", base_name)
-        else:
-            for _, cat in found_list:
-                if not _overwrites_match(cat.overwrites, desired):
-                    await cat.edit(overwrites=desired)
-                    log.info("Synced permissions on '%s' category", cat.name)
-                else:
-                    log.info("Permissions already current on '%s' category", cat.name)
+        if base_name not in primary_found:
+            if create_if_missing:
+                cat = await guild.create_category(base_name, overwrites=desired)
+                # Primary = order 1 (not biased) so combined sorts before any legacy.
+                found_list.append((1, cat))
+                primary_found.add(base_name)
+                log.info("Created '%s' category", base_name)
+            else:
+                log.debug("Legacy category '%s' not present — skipping discovery-only entry", base_name)
+        # Sync permissions on all matched categories (primary + overflow).
+        for _, cat in found_list:
+            if _match_category_group(cat.name, base_name) is None:
+                continue  # skip entries that belong to other base_names sharing this list
+            if not _overwrites_match(cat.overwrites, desired):
+                await cat.edit(overwrites=desired)
+                log.info("Synced permissions on '%s' category", cat.name)
+            else:
+                log.info("Permissions already current on '%s' category", cat.name)
 
     # Sync channel permissions inside Killed categories — channels moved
     # before the privacy change still have view_channel=True for @everyone.
