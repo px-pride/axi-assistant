@@ -32,6 +32,7 @@ __all__ = [
     "HISTORY_PATH",
     "HTTP_API_HOST",
     "HTTP_API_PORT",
+    "HTTP_API_TOKEN",
     "IDLE_REMINDER_THRESHOLDS",
     "INTERRUPT_TIMEOUT",
     "KILLED_CATEGORY_NAME",
@@ -546,6 +547,7 @@ def load_mcp_servers(names: list[str]) -> dict[str, dict[str, Any]]:
 MASTER_AGENT_NAME = "axi-master"
 HTTP_API_PORT = int(os.environ.get("HTTP_API_PORT", "0"))
 HTTP_API_HOST = os.environ.get("HTTP_API_HOST", "127.0.0.1")
+HTTP_API_TOKEN = os.environ.get("HTTP_API_TOKEN", "")
 MAX_AWAKE_AGENTS = int(os.environ.get("MAX_AWAKE_AGENTS", "7"))
 IDLE_REMINDER_THRESHOLDS = [timedelta(minutes=30), timedelta(hours=3), timedelta(hours=48)]
 QUERY_TIMEOUT = 43200  # 12 hours

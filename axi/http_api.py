@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import time
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
@@ -50,13 +51,25 @@ class TriggerRequest(BaseModel):
     mcp_servers: list[str] | None = None
 
 
+async def require_bearer_token(authorization: str | None = Header(default=None)) -> None:
+    # Empty HTTP_API_TOKEN is only safe because main.py refuses to start on non-loopback without it.
+    expected = config.HTTP_API_TOKEN
+    if not expected:
+        return
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    provided = authorization[len("Bearer ") :]
+    if not secrets.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Invalid bearer token")
+
+
 @app.get("/metrics")
 async def metrics() -> Response:
     return Response(content=render_latest_metrics(), media_type=metrics_content_type())
 
 
 @app.post("/v1/trigger")
-async def trigger(req: TriggerRequest):
+async def trigger(req: TriggerRequest, _: None = Depends(require_bearer_token)):
     agent_name = req.session
     agent_cwd = req.cwd or os.path.join(config.AXI_USER_DATA, "agents", agent_name)
 
