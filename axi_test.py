@@ -137,8 +137,17 @@ def _install_py_unit() -> None:
     unit = "axi-test@.service"
     src = os.path.join(BOT_DIR, unit)
     dst = os.path.join(user_units, unit)
-    if os.path.islink(dst) and os.readlink(dst) == src:
-        return
+    if os.path.islink(dst):
+        existing = os.readlink(dst)
+        if existing == src:
+            return
+        try:
+            if os.path.isfile(existing) and os.path.isfile(src):
+                with open(existing, "rb") as fa, open(src, "rb") as fb:
+                    if fa.read() == fb.read():
+                        return
+        except OSError:
+            pass
     if os.path.exists(dst):
         os.remove(dst)
     os.symlink(src, dst)

@@ -292,6 +292,97 @@ def extract_tool_preview(tool_name: str, raw_json: str) -> str | None:
     return None
 
 
+# Zero-width space used to blank out trailing chunks when content shrinks.
+# Discord rejects empty edits, so we replace stale trailing content with
+# this single-character payload instead of deleting the message.
+_BLANK_CONTENT = "\u200b"
+
+
+async def _safe_channel_send(channel: TextChannel, content: str) -> discord.Message | None:
+    """Send a message, swallowing Discord HTTP errors so they don't abort the query."""
+    try:
+        return await _retry_discord_503(channel.send, content)
+    except discord.HTTPException as exc:
+        log.warning(
+            "Discord send failed (status=%s code=%s) for #%s; continuing: %s",
+            getattr(exc, "status", "?"),
+            getattr(exc, "code", "?"),
+            getattr(channel, "name", "?"),
+            exc,
+        )
+        return None
+
+
+async def _safe_message_edit(msg: discord.Message, content: str) -> None:
+    """Edit a message, swallowing Discord HTTP errors so they don't abort the query."""
+    try:
+        await _retry_discord_503(msg.edit, content=content)
+    except discord.HTTPException as exc:
+        log.warning(
+            "Discord edit failed (status=%s code=%s) on message %s; continuing: %s",
+            getattr(exc, "status", "?"),
+            getattr(exc, "code", "?"),
+            getattr(msg, "id", "?"),
+            exc,
+        )
+
+
+async def _render_chunked(
+    channel: TextChannel,
+    tracked: list[discord.Message],
+    content: str,
+) -> list[discord.Message]:
+    """Render ``content`` across one or more tracked messages, chunking as needed.
+
+    Edits in place where possible; appends new messages when content grows past
+    existing chunks; blanks trailing chunks (zero-width space) when content
+    shrinks. All Discord HTTP errors are swallowed so an in-band display update
+    can never abort the caller's streaming loop.
+    """
+    chunks = split_message(content) if content else [_BLANK_CONTENT]
+    for i, chunk in enumerate(chunks):
+        body = chunk if chunk else _BLANK_CONTENT
+        if i < len(tracked):
+            if tracked[i].content != body:
+                await _safe_message_edit(tracked[i], body)
+                tracked[i] = _with_content(tracked[i], body)
+        else:
+            sent = await _safe_channel_send(channel, body)
+            if sent is not None:
+                tracked.append(sent)
+    for i in range(len(chunks), len(tracked)):
+        if tracked[i].content != _BLANK_CONTENT:
+            await _safe_message_edit(tracked[i], _BLANK_CONTENT)
+            tracked[i] = _with_content(tracked[i], _BLANK_CONTENT)
+    return tracked
+
+
+def _with_content(msg: discord.Message, content: str) -> discord.Message:
+    """Best-effort cached-content update on a Message object.
+
+    discord.py's ``Message.content`` is read-only in newer versions; our later
+    comparisons only care about the string we last sent, so we fall back to a
+    lightweight shim when assignment isn't permitted.
+    """
+    try:
+        msg.content = content  # type: ignore[misc]
+        return msg
+    except (AttributeError, TypeError):
+        pass
+
+    class _CachedContentMessage:
+        __slots__ = ("_wrapped", "content")
+
+        def __init__(self, wrapped: discord.Message, cached: str) -> None:
+            object.__setattr__(self, "_wrapped", wrapped)
+            object.__setattr__(self, "content", cached)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._wrapped, name)
+
+    return cast("discord.Message", _CachedContentMessage(msg, content))
+
+
 async def _announce_agent_tool_use(
     ctx: _StreamCtx,
     channel: TextChannel,
@@ -310,24 +401,20 @@ async def _announce_agent_tool_use(
         body = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False)
         content = f"`🔧 {label}`\n```json\n{body}\n```"
 
-    msg = ctx.agent_announcement_messages.get(tool_use_id)
-    if msg is None:
+    tracked = ctx.agent_announcement_messages.get(tool_use_id)
+    if tracked is None:
         if tool_use_id in ctx.announced_agent_tool_uses:
             return
         ctx.announced_agent_tool_uses.add(tool_use_id)
-        if payload:
-            assert _send_long is not None
-            sent = await _send_long(channel, content)
-            if sent is not None:
-                ctx.agent_announcement_messages[tool_use_id] = sent
-        else:
-            sent = await _retry_discord_503(channel.send, content)
-            ctx.agent_announcement_messages[tool_use_id] = sent
+        tracked = []
+        ctx.agent_announcement_messages[tool_use_id] = tracked
+        await _render_chunked(channel, tracked, content)
         return
 
-    if payload and msg.content != content:
-        if "```json" not in msg.content or len(content) > len(msg.content):
-            await _retry_discord_503(msg.edit, content=content)
+    current = "".join(m.content for m in tracked if m.content != _BLANK_CONTENT)
+    if payload and current != content:
+        if "```json" not in current or len(content) > len(current):
+            await _render_chunked(channel, tracked, content)
 
 
 async def _upsert_task_status(
@@ -340,12 +427,11 @@ async def _upsert_task_status(
     if ctx.task_last_status_content.get(task_id) == content:
         return
 
-    msg = ctx.task_status_messages.get(task_id)
-    if msg is None:
-        sent = await _retry_discord_503(channel.send, content)
-        ctx.task_status_messages[task_id] = sent
-    else:
-        await _retry_discord_503(msg.edit, content=content)
+    tracked = ctx.task_status_messages.get(task_id)
+    if tracked is None:
+        tracked = []
+        ctx.task_status_messages[task_id] = tracked
+    await _render_chunked(channel, tracked, content)
     ctx.task_last_status_content[task_id] = content
 
 
@@ -444,7 +530,7 @@ class _StreamCtx:
         self.text_buffer: str = ""
         self.active_tool_uses: dict[str, tuple[str, float]] = {}
         self.announced_agent_tool_uses: set[str] = set()
-        self.agent_announcement_messages: dict[str, discord.Message] = {}
+        self.agent_announcement_messages: dict[str, list[discord.Message]] = {}
         self.agent_context_labels: dict[str, str] = {}
         self.current_model: str | None = None
         self.got_result: bool = False  # True once a ResultMessage is received
@@ -465,7 +551,7 @@ class _StreamCtx:
         self.last_flushed_content: str = ""  # Content of the last flushed message
         self.deferred_msg: str = ""  # Non-streaming: holds back the last message for timing append
         self.task_start_messages: dict[str, discord.Message] = {}
-        self.task_status_messages: dict[str, discord.Message] = {}
+        self.task_status_messages: dict[str, list[discord.Message]] = {}
         self.task_last_status_content: dict[str, str] = {}
 
 
