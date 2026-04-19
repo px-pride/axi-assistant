@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from discord_e2e import DiscordChannel, DiscordE2EClient
 
+DEFAULT_BOT_SENTINEL = "awaiting input"
+
 
 class StubWaitClient:
     def __init__(self) -> None:
@@ -168,6 +170,6 @@ def test_discord_channel_delegates_to_client() -> None:
         ("history", ("123",), {"limit": 5, "after": "99"}),
         ("latest_message_id", ("123",), {}),
         ("wait_for_messages", ("123",), {"after": "1", "timeout": 5.0, "poll_interval": 2.0, "ignore_system": True, "substring": None, "stable_polls": None}),
-        ("wait_for_bot_response", ("123",), {"after": "2", "timeout": 120.0, "poll_interval": 2.0, "sentinel": "awaiting input", "check": "OK"}),
-        ("send_and_wait", ("123", "ping"), {"timeout": 9.0, "sentinel": "awaiting input"}),
+        ("wait_for_bot_response", ("123",), {"after": "2", "timeout": 120.0, "poll_interval": 2.0, "sentinel": DEFAULT_BOT_SENTINEL, "check": "OK"}),
+        ("send_and_wait", ("123", "ping"), {"timeout": 9.0, "sentinel": DEFAULT_BOT_SENTINEL}),
     ]

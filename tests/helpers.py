@@ -2,6 +2,8 @@
 
 from discord_e2e import DiscordChannel, DiscordE2EClient
 
+TEST_SENTINEL = "awaiting input"
+
 
 class Discord(DiscordE2EClient):
     """Axi-specific test adapter built on the generic Discord E2E client."""
@@ -28,7 +30,7 @@ class Discord(DiscordE2EClient):
             after=after,
             timeout=timeout,
             poll_interval=poll_interval,
-            sentinel="awaiting input" if sentinel else None,
+            sentinel=TEST_SENTINEL if sentinel else None,
             check=check,
         )
         return result.messages
@@ -44,7 +46,7 @@ class Discord(DiscordE2EClient):
             channel_id,
             content,
             timeout=timeout,
-            sentinel="awaiting input" if sentinel else None,
+            sentinel=TEST_SENTINEL if sentinel else None,
         )
         return result.messages
 

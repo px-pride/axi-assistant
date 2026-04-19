@@ -4,12 +4,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from discord_e2e import DiscordChannel
+    from discord_e2e import DiscordChannel, DiscordE2EClient
 
 
 @dataclass(slots=True)
 class AxiDiscordEntrypoints:
     master: DiscordChannel
+    discord: DiscordE2EClient | None = None
 
     def spawn_agent(
         self,
@@ -43,3 +44,22 @@ class AxiDiscordEntrypoints:
     def send_to_agent(self, name: str, message: str, *, timeout: float = 60.0) -> list[dict]:
         content = f'Send a message to the agent "{name}" saying: "{message}"'
         return self.master.send_and_wait(content, timeout=timeout)
+
+    def send_direct_to_agent(
+        self,
+        name: str,
+        message: str,
+        *,
+        timeout: float = 60.0,
+        channel_timeout: float = 60.0,
+        poll_interval: float = 2.0,
+        sentinel: str | None = "awaiting input",
+    ) -> list[dict]:
+        if self.discord is None:
+            raise AssertionError("Direct agent-channel messaging requires a Discord client")
+        agent = self.discord.wait_for_channel(
+            name,
+            timeout=channel_timeout,
+            poll_interval=poll_interval,
+        )
+        return agent.send_and_wait(message, timeout=timeout, sentinel=sentinel)

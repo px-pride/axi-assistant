@@ -18,7 +18,7 @@ def test_agent_tool_visibility_in_parent_channel(
 ) -> None:
     name = f"agentvis-{int(time.time() * 1000)}"
     master = discord.channel(master_channel, name="axi-master")
-    axi = AxiDiscordEntrypoints(master)
+    axi = AxiDiscordEntrypoints(master, discord=discord)
     try:
         axi.spawn_agent(
             name=name,
@@ -30,7 +30,7 @@ def test_agent_tool_visibility_in_parent_channel(
         agent = discord.wait_for_channel(name, timeout=60.0)
         baseline = agent.latest_message_id() or "0"
 
-        axi.send_to_agent(
+        axi.send_direct_to_agent(
             name,
             "Use the Agent tool exactly once. Ask a subagent to answer with exactly SUBAGENT_OK and nothing else.",
             timeout=45.0,
