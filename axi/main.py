@@ -2090,9 +2090,9 @@ async def restart_including_bridge_cmd(interaction: discord.Interaction, force: 
 # ---------------------------------------------------------------------------
 
 
-@bot.tree.command(name="dj-join", description="Join a voice channel and stream Dynamic Radio.")
+@bot.tree.command(name="vc-join", description="Join a voice channel and stream Dynamic Radio.")
 @app_commands.describe(channel="Voice channel to join (defaults to your current VC)")
-async def dj_join_command(
+async def vc_join_command(
     interaction: discord.Interaction,
     channel: discord.VoiceChannel | None = None,
 ) -> None:
@@ -2114,8 +2114,8 @@ async def dj_join_command(
         await interaction.followup.send(f"Failed to join: {e}", ephemeral=True)
 
 
-@bot.tree.command(name="dj-leave", description="Leave the voice channel and stop streaming.")
-async def dj_leave_command(interaction: discord.Interaction) -> None:
+@bot.tree.command(name="vc-leave", description="Leave the voice channel and stop streaming.")
+async def vc_leave_command(interaction: discord.Interaction) -> None:
     from axi import voice
 
     if interaction.guild is None:
