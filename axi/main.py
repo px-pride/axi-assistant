@@ -2961,6 +2961,16 @@ async def on_ready() -> None:
         _startup_complete = True
 
         if config.HTTP_API_PORT:
+            if config.HTTP_API_HOST not in {"127.0.0.1", "::1", "localhost"} and not config.HTTP_API_TOKEN:
+                log.critical(
+                    "HTTP_API_HOST=%r is non-loopback; refusing to start HTTP API without HTTP_API_TOKEN. "
+                    "Set HTTP_API_TOKEN to a strong random secret or bind HTTP_API_HOST=127.0.0.1.",
+                    config.HTTP_API_HOST,
+                )
+                raise SystemExit(
+                    f"HTTP_API_HOST={config.HTTP_API_HOST!r} requires HTTP_API_TOKEN to be set."
+                )
+
             import uvicorn
 
             from axi.http_api import app as http_app
