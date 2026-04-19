@@ -286,18 +286,12 @@ async def _announce_agent_tool_use(
         return
 
     payload = tool_input or {}
-    description = payload.get("description")
-    subagent_type = payload.get("subagent_type")
-    prefix_parts = ["`🔧 Agent"]
-    if subagent_type:
-        prefix_parts.append(f"{subagent_type}")
-    if description:
-        prefix_parts.append(f"— {description}")
-    prefix = " ".join(prefix_parts) + f" ({tool_use_id})`"
-    content = prefix
+    label = _agent_context_label(tool_use_id, payload)
+    ctx.agent_context_labels[tool_use_id] = label
+    content = f"`🔧 {label}`"
     if payload:
         body = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False)
-        content = f"{prefix}\n```json\n{body}\n```"
+        content = f"`🔧 {label}`\n```json\n{body}\n```"
 
     msg = ctx.agent_announcement_messages.get(tool_use_id)
     if msg is None:
@@ -338,6 +332,39 @@ async def _upsert_task_status(
     ctx.task_last_status_content[task_id] = content
 
 
+def _agent_context_label(tool_use_id: str, tool_input: dict[str, Any] | None) -> str:
+    """Build a short human-readable label for a top-level Agent tool call."""
+    payload = tool_input or {}
+    description = payload.get("description")
+    subagent_type = payload.get("subagent_type")
+    parts = ["Agent"]
+    if subagent_type:
+        parts.append(subagent_type)
+    if description:
+        parts.append(f"— {description}")
+    return " ".join(parts) + f" ({tool_use_id})"
+
+
+def _resolve_parent_agent_tool_use_id(ctx: _StreamCtx, tool_use_id: str | None) -> str | None:
+    """Resolve a tool/task back to its top-level Agent tool_use_id when possible."""
+    current = tool_use_id
+    seen: set[str] = set()
+    while current and current not in seen:
+        if current in ctx.agent_context_labels:
+            return current
+        seen.add(current)
+        current = ctx.tool_use_parents.get(current)
+    return None
+
+
+def _task_text_preview(text: str | None, limit: int = 120) -> str:
+    """Collapse multiline task text into a short single-line preview."""
+    collapsed = " ".join((text or "").split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 1] + "…"
+
+
 # ---------------------------------------------------------------------------
 # Stream context + helpers
 # ---------------------------------------------------------------------------
@@ -370,6 +397,7 @@ class _StreamCtx:
     __slots__ = (
         "active_tool_uses",
         "agent_announcement_messages",
+        "agent_context_labels",
         "announced_agent_tool_uses",
         "current_model",
         "deferred_msg",
@@ -391,6 +419,7 @@ class _StreamCtx:
         "text_buffer",
         "thinking_message",
         "tool_input_json",
+        "tool_use_parents",
         "typing_stopped",
     )
 
@@ -399,6 +428,7 @@ class _StreamCtx:
         self.active_tool_uses: dict[str, tuple[str, float]] = {}
         self.announced_agent_tool_uses: set[str] = set()
         self.agent_announcement_messages: dict[str, discord.Message] = {}
+        self.agent_context_labels: dict[str, str] = {}
         self.current_model: str | None = None
         self.got_result: bool = False  # True once a ResultMessage is received
         self.hit_rate_limit: bool = False
@@ -407,6 +437,7 @@ class _StreamCtx:
         self.flush_count: int = 0
         self.msg_total: int = 0
         self.tool_input_json: str = ""  # Accumulates full tool input JSON for current tool_use block
+        self.tool_use_parents: dict[str, str | None] = {}
         self.in_flowchart: bool = False  # True during flowchart execution (protects session_id)
         self.had_flowchart: bool = False  # True once a flowchart ran (survives flowchart_complete)
         self.suppress_stream: bool = False  # True when current block has output_schema (JSON is internal)
@@ -670,6 +701,7 @@ async def _handle_stream_event(
             tool_name = block.get("name") or session.activity.tool_name or "unknown"
             if tool_use_id:
                 ctx.active_tool_uses[tool_use_id] = (tool_name, time.monotonic())
+                ctx.tool_use_parents[tool_use_id] = msg.parent_tool_use_id
             if tool_name == "Agent" and not msg.parent_tool_use_id:
                 await _announce_agent_tool_use(ctx, channel, tool_use_id, block.get("input"))
     elif event_type == "content_block_delta":
@@ -830,6 +862,7 @@ async def _handle_assistant_message(
             tool_name = getattr(block_any, "name", None) or "unknown"
             if tool_use_id and tool_use_id not in ctx.active_tool_uses:
                 ctx.active_tool_uses[tool_use_id] = (tool_name, time.monotonic())
+                ctx.tool_use_parents[tool_use_id] = msg.parent_tool_use_id
             if tool_name == "Agent" and not msg.parent_tool_use_id:
                 await _announce_agent_tool_use(
                     ctx,
@@ -920,7 +953,11 @@ async def _handle_system_message(
         description = msg.data.get("description") or "subagent"
         task_type = msg.data.get("task_type") or "unknown"
         tool_use_id = msg.data.get("tool_use_id") or "?"
-        content = f"`🔧 {task_type} — {description} ({tool_use_id})`\nStarted task `{task_id}`"
+        parent_agent_tool_use_id = _resolve_parent_agent_tool_use_id(ctx, tool_use_id)
+        prefix = f"`🔧 {task_type}"
+        if parent_agent_tool_use_id:
+            prefix = f"`🔧 [{ctx.agent_context_labels[parent_agent_tool_use_id]}] {task_type}"
+        content = f"{prefix} — {_task_text_preview(description)} ({tool_use_id})`\nStarted task `{task_id}`"
         if task_id not in ctx.task_start_messages:
             ctx.task_start_messages[task_id] = await _retry_discord_503(channel.send, content)
 
@@ -932,14 +969,18 @@ async def _handle_system_message(
             return
         description = msg.data.get("description") or "subagent"
         tool_use_id = msg.data.get("tool_use_id") or "?"
+        parent_agent_tool_use_id = _resolve_parent_agent_tool_use_id(ctx, tool_use_id)
         usage = msg.data.get("usage") if isinstance(msg.data.get("usage"), dict) else {}
         tool_uses = usage.get("tool_uses", 0)
         duration_ms = usage.get("duration_ms", 0)
         total_tokens = usage.get("total_tokens", 0)
         last_tool_name = msg.data.get("last_tool_name") or "?"
         duration_s = duration_ms / 1000 if isinstance(duration_ms, (int, float)) else 0
+        label = f"task progress — {_task_text_preview(description)} ({tool_use_id})"
+        if parent_agent_tool_use_id:
+            label = f"[{ctx.agent_context_labels[parent_agent_tool_use_id]}] task progress — {_task_text_preview(description)} ({tool_use_id})"
         content = (
-            f"`🔧 task progress — {description} ({tool_use_id})`\n"
+            f"`🔧 {label}`\n"
             f"Task `{task_id}` | {tool_uses} tools | {total_tokens} tokens | {duration_s:.1f}s | last tool: `{last_tool_name}`"
         )
         await _upsert_task_status(ctx, channel, task_id, content)
@@ -953,6 +994,8 @@ async def _handle_system_message(
         status = msg.data.get("status") or "unknown"
         summary = msg.data.get("summary") or ""
         output_file = msg.data.get("output_file") or ""
+        tool_use_id = msg.data.get("tool_use_id") or "?"
+        parent_agent_tool_use_id = _resolve_parent_agent_tool_use_id(ctx, tool_use_id)
         usage = msg.data.get("usage") if isinstance(msg.data.get("usage"), dict) else {}
         tool_uses = usage.get("tool_uses")
         duration_ms = usage.get("duration_ms")
@@ -964,9 +1007,12 @@ async def _handle_system_message(
         if output_file:
             details.append(f"output=`{output_file}`")
         details_str = " | ".join(details)
-        content = f"`🔧 task {status} ({task_id})`"
+        label = f"task {status} ({task_id})"
+        if parent_agent_tool_use_id:
+            label = f"[{ctx.agent_context_labels[parent_agent_tool_use_id]}] task {status} ({task_id})"
+        content = f"`🔧 {label}`"
         if summary:
-            content += f"\n{summary}"
+            content += f"\n{_task_text_preview(summary, limit=240)}"
         if details_str:
             content += f"\n{details_str}"
         await _upsert_task_status(ctx, channel, task_id, content)
