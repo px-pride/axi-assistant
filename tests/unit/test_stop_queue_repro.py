@@ -195,6 +195,17 @@ async def test_axi_master_stop_clears_latest_message(session: AgentSession) -> N
 async def test_stop_clears_queue_before_interrupt_finishes(session: AgentSession) -> None:
     author = FakeAuthor(_allowed_user_id())
     channel = FakeTextChannel(12345, "axi-master")
+
+    # Queue the followup first while _interrupt_agent is still the fixture's AsyncMock.
+    # Patching the slow stub before this would also block on_message's own
+    # _interrupt_agent call (main.py:452 fires it whenever a message queues at
+    # a busy agent), causing the test to hang inside on_message.
+    await session.query_lock.acquire()
+    await main.on_message(FakeMessage(40, channel, "queued followup", author))
+    assert len(session.message_queue) == 1
+
+    # NOW install the slow stub so /stop's call to _interrupt_agent pauses
+    # mid-flight, letting us inspect the queue between clear-and-interrupt.
     interrupt_started = asyncio.Event()
     release_interrupt = asyncio.Event()
 
@@ -204,17 +215,13 @@ async def test_stop_clears_queue_before_interrupt_finishes(session: AgentSession
 
     main._interrupt_agent = _slow_interrupt  # type: ignore[assignment]
 
-    await session.query_lock.acquire()
-    await main.on_message(FakeMessage(40, channel, "queued followup", author))
-    assert len(session.message_queue) == 1
-
     stop_task = asyncio.create_task(main._handle_text_command(FakeMessage(41, channel, "/stop", author), session, session.name))
-    await interrupt_started.wait()
+    await asyncio.wait_for(interrupt_started.wait(), timeout=5.0)
 
     assert len(session.message_queue) == 0
 
     release_interrupt.set()
-    handled = await stop_task
+    handled = await asyncio.wait_for(stop_task, timeout=5.0)
     assert handled is True
 
 
