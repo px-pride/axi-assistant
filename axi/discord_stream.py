@@ -31,21 +31,21 @@ from claude_agent_sdk.types import (
     ResultMessage,
     StreamEvent,
     SystemMessage,
+    ToolResultBlock,
+    UserMessage,
 )
+from claudewire.events import as_stream, update_activity
+from claudewire.session import get_stdio_logger
 from discord import TextChannel
 from opentelemetry import context as otel_context
 from opentelemetry import trace
 
 from axi import config
 from axi.axi_types import ActivityState, AgentSession, discord_state
-from axi.rate_limits import (
-    record_session_usage as _record_session_usage,
-)
-from axi.rate_limits import (
-    update_rate_limit_quota as _update_rate_limit_quota,
-)
-from claudewire.events import as_stream, update_activity
-from claudewire.session import get_stdio_logger
+from axi.discord_wire import audited_channel_send
+from axi.metrics import observe_llm_result, observe_tool_result
+from axi.rate_limits import record_session_usage as _record_session_usage
+from axi.rate_limits import update_rate_limit_quota as _update_rate_limit_quota
 from discordquery import split_message
 
 if TYPE_CHECKING:
@@ -98,6 +98,8 @@ async def _retry_discord_503(fn: Callable[..., Awaitable[Any]], *args: Any, **kw
             else:
                 raise
 
+    raise RuntimeError("unreachable: Discord 503 retry loop exhausted")
+
 
 async def _drain_and_send_stderr(session: AgentSession, channel: TextChannel) -> None:
     """Drain stderr buffer and optionally send output as code blocks.
@@ -116,7 +118,7 @@ async def _drain_and_send_stderr(session: AgentSession, channel: TextChannel) ->
         stderr_text = stderr_msg.strip()
         if stderr_text:
             for part in split_message(f"```\n{stderr_text}\n```"):
-                await _retry_discord_503(channel.send, part)
+                await audited_channel_send(channel, part, retry_fn=_retry_discord_503, operation="stream.stderr")
 
 # Explicit exports for re-export from agents.py (suppresses pyright reportPrivateUsage)
 __all__ = [
@@ -273,6 +275,96 @@ def extract_tool_preview(tool_name: str, raw_json: str) -> str | None:
     return None
 
 
+async def _announce_agent_tool_use(
+    ctx: _StreamCtx,
+    channel: TextChannel,
+    tool_use_id: str | None,
+    tool_input: dict[str, Any] | None,
+) -> None:
+    """Post or enrich a top-level Agent tool invocation in Discord."""
+    if not tool_use_id:
+        return
+
+    payload = tool_input or {}
+    label = _agent_context_label(tool_use_id, payload)
+    ctx.agent_context_labels[tool_use_id] = label
+    content = f"`🔧 {label}`"
+    if payload:
+        body = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False)
+        content = f"`🔧 {label}`\n```json\n{body}\n```"
+
+    msg = ctx.agent_announcement_messages.get(tool_use_id)
+    if msg is None:
+        if tool_use_id in ctx.announced_agent_tool_uses:
+            return
+        ctx.announced_agent_tool_uses.add(tool_use_id)
+        if payload:
+            assert _send_long is not None
+            sent = await _send_long(channel, content)
+            if sent is not None:
+                ctx.agent_announcement_messages[tool_use_id] = sent
+        else:
+            sent = await _retry_discord_503(channel.send, content)
+            ctx.agent_announcement_messages[tool_use_id] = sent
+        return
+
+    if payload and msg.content != content:
+        if "```json" not in msg.content or len(content) > len(msg.content):
+            await _retry_discord_503(msg.edit, content=content)
+
+
+async def _upsert_task_status(
+    ctx: _StreamCtx,
+    channel: TextChannel,
+    task_id: str,
+    content: str,
+) -> None:
+    """Create or update the Discord message for one Agent task."""
+    if ctx.task_last_status_content.get(task_id) == content:
+        return
+
+    msg = ctx.task_status_messages.get(task_id)
+    if msg is None:
+        sent = await _retry_discord_503(channel.send, content)
+        ctx.task_status_messages[task_id] = sent
+    else:
+        await _retry_discord_503(msg.edit, content=content)
+    ctx.task_last_status_content[task_id] = content
+
+
+def _agent_context_label(tool_use_id: str, tool_input: dict[str, Any] | None) -> str:
+    """Build a short human-readable label for a top-level Agent tool call."""
+    payload = tool_input or {}
+    description = payload.get("description")
+    subagent_type = payload.get("subagent_type")
+    parts = ["Agent"]
+    if subagent_type:
+        parts.append(subagent_type)
+    if description:
+        parts.append(f"— {description}")
+    return " ".join(parts) + f" ({tool_use_id})"
+
+
+def _resolve_parent_agent_tool_use_id(ctx: _StreamCtx, tool_use_id: str | None) -> str | None:
+    """Resolve a tool/task back to its top-level Agent tool_use_id when possible."""
+    current = tool_use_id
+    seen: set[str] = set()
+    while current and current not in seen:
+        if current in ctx.agent_context_labels:
+            return current
+        seen.add(current)
+        current = ctx.tool_use_parents.get(current)
+    return None
+
+
+def _task_text_preview(text: str | None, limit: int = 120) -> str:
+    """Collapse multiline task text into a short single-line preview."""
+    collapsed = " ".join((text or "").split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 1] + "…"
+
+
 # ---------------------------------------------------------------------------
 # Stream context + helpers
 # ---------------------------------------------------------------------------
@@ -303,6 +395,11 @@ class _StreamCtx:
     """Mutable state for a single stream_response_to_channel invocation."""
 
     __slots__ = (
+        "active_tool_uses",
+        "agent_announcement_messages",
+        "agent_context_labels",
+        "announced_agent_tool_uses",
+        "current_model",
         "deferred_msg",
         "flush_count",
         "got_result",
@@ -315,15 +412,24 @@ class _StreamCtx:
         "last_flushed_msg_id",
         "live_edit",
         "msg_total",
+        "suppress_stream",
+        "task_last_status_content",
+        "task_start_messages",
+        "task_status_messages",
         "text_buffer",
         "thinking_message",
         "tool_input_json",
+        "tool_use_parents",
         "typing_stopped",
-        "suppress_stream",
     )
 
     def __init__(self, live_edit: _LiveEditState | None = None) -> None:
         self.text_buffer: str = ""
+        self.active_tool_uses: dict[str, tuple[str, float]] = {}
+        self.announced_agent_tool_uses: set[str] = set()
+        self.agent_announcement_messages: dict[str, discord.Message] = {}
+        self.agent_context_labels: dict[str, str] = {}
+        self.current_model: str | None = None
         self.got_result: bool = False  # True once a ResultMessage is received
         self.hit_rate_limit: bool = False
         self.hit_transient_error: str | None = None
@@ -331,6 +437,7 @@ class _StreamCtx:
         self.flush_count: int = 0
         self.msg_total: int = 0
         self.tool_input_json: str = ""  # Accumulates full tool input JSON for current tool_use block
+        self.tool_use_parents: dict[str, str | None] = {}
         self.in_flowchart: bool = False  # True during flowchart execution (protects session_id)
         self.had_flowchart: bool = False  # True once a flowchart ran (survives flowchart_complete)
         self.suppress_stream: bool = False  # True when current block has output_schema (JSON is internal)
@@ -340,6 +447,9 @@ class _StreamCtx:
         self.last_flushed_channel_id: int | None = None
         self.last_flushed_content: str = ""  # Content of the last flushed message
         self.deferred_msg: str = ""  # Non-streaming: holds back the last message for timing append
+        self.task_start_messages: dict[str, discord.Message] = {}
+        self.task_status_messages: dict[str, discord.Message] = {}
+        self.task_last_status_content: dict[str, str] = {}
 
 
 async def _flush_text(ctx: _StreamCtx, session: AgentSession, channel: TextChannel, reason: str = "?") -> None:
@@ -515,7 +625,12 @@ async def _show_thinking(ctx: _StreamCtx, channel: TextChannel) -> None:
     """Send a temporary 'thinking...' indicator message."""
     if ctx.thinking_message is None:
         try:
-            ctx.thinking_message = await _retry_discord_503(channel.send, "*thinking...*")
+            ctx.thinking_message = await audited_channel_send(
+                channel,
+                "*thinking...*",
+                retry_fn=_retry_discord_503,
+                operation="stream.thinking_indicator",
+            )
         except Exception:
             log.debug("Failed to send thinking indicator", exc_info=True)
 
@@ -582,6 +697,13 @@ async def _handle_stream_event(
         block = event.get("content_block", {})
         if block.get("type") == "tool_use":
             ctx.tool_input_json = ""
+            tool_use_id = block.get("id")
+            tool_name = block.get("name") or session.activity.tool_name or "unknown"
+            if tool_use_id:
+                ctx.active_tool_uses[tool_use_id] = (tool_name, time.monotonic())
+                ctx.tool_use_parents[tool_use_id] = msg.parent_tool_use_id
+            if tool_name == "Agent" and not msg.parent_tool_use_id:
+                await _announce_agent_tool_use(ctx, channel, tool_use_id, block.get("input"))
     elif event_type == "content_block_delta":
         delta = event.get("delta", {})
         if delta.get("type") == "input_json_delta":
@@ -604,15 +726,31 @@ async def _handle_stream_event(
             thinking = session.activity.thinking_text.strip()
             if thinking:
                 file = discord.File(io.BytesIO(thinking.encode("utf-8")), filename="thinking.md")
-                await _retry_discord_503(channel.send, "\U0001f4ad", file=file)
+                await audited_channel_send(
+                    channel,
+                    "\U0001f4ad",
+                    file=file,
+                    retry_fn=_retry_discord_503,
+                    operation="stream.thinking_file",
+                )
                 session.activity.thinking_text = ""
         elif session.activity.phase == "waiting" and session.activity.tool_name:
             tool = session.activity.tool_name
             preview = extract_tool_preview(tool, session.activity.tool_input_preview)
             if preview:
-                await _retry_discord_503(channel.send, f"`\U0001f527 {tool}: {preview[:120]}`")
+                await audited_channel_send(
+                    channel,
+                    f"`\U0001f527 {tool}: {preview[:120]}`",
+                    retry_fn=_retry_discord_503,
+                    operation="stream.tool_preview",
+                )
             else:
-                await _retry_discord_503(channel.send, f"`\U0001f527 {tool}`")
+                await audited_channel_send(
+                    channel,
+                    f"`\U0001f527 {tool}`",
+                    retry_fn=_retry_discord_503,
+                    operation="stream.tool_preview",
+                )
 
     # Log stream events
     if session.agent_log:
@@ -636,6 +774,8 @@ async def _handle_stream_event(
             await _flush_text(ctx, session, channel, "end_turn")
             ctx.text_buffer = ""
             await _hide_thinking(ctx)
+    elif event_type == "message_start":
+        ctx.current_model = event.get("message", {}).get("model") or ctx.current_model
 
 
 def _log_stream_event(session: AgentSession, event_type: str, event: dict[str, Any]) -> None:
@@ -661,11 +801,25 @@ def _log_stream_event(session: AgentSession, event_type: str, event: dict[str, A
         session.agent_log.debug("STREAM: %s %s", event_type, json.dumps(event)[:300])
 
 
+async def _handle_user_message(ctx: _StreamCtx, session: AgentSession, msg: UserMessage) -> None:
+    """Handle SDK user messages, including tool results."""
+    if not isinstance(msg.content, list):
+        return
+    for block in msg.content:
+        if not isinstance(block, ToolResultBlock):
+            continue
+        tool_name, started_at = ctx.active_tool_uses.pop(block.tool_use_id, ("unknown", 0.0))
+        duration_seconds = None if started_at <= 0 else time.monotonic() - started_at
+        observe_tool_result(tool_name, duration_seconds, block.is_error)
+
+
 async def _handle_assistant_message(
     ctx: _StreamCtx, session: AgentSession, channel: TextChannel, msg: AssistantMessage, typing_ctx: Any
 ) -> None:
     """Handle an AssistantMessage during response streaming."""
+    ctx.current_model = msg.model or ctx.current_model
     if msg.error in ("rate_limit", "billing_error"):
+        observe_llm_result(model=msg.model, outcome=msg.error)
         error_text = ctx.text_buffer
         for block in msg.content or []:
             if hasattr(block, "text"):
@@ -678,6 +832,7 @@ async def _handle_assistant_message(
         ctx.text_buffer = ""
         ctx.hit_rate_limit = True
     elif msg.error:
+        observe_llm_result(model=msg.model, outcome="error")
         error_text = ctx.text_buffer
         for block in msg.content or []:
             if hasattr(block, "text"):
@@ -700,16 +855,32 @@ async def _handle_assistant_message(
         ctx.text_buffer = ""
         await _hide_thinking(ctx)
 
+    for block in msg.content or []:
+        block_any: Any = block
+        if hasattr(block, "id") and hasattr(block, "name") and hasattr(block, "input"):
+            tool_use_id = getattr(block_any, "id", None)
+            tool_name = getattr(block_any, "name", None) or "unknown"
+            if tool_use_id and tool_use_id not in ctx.active_tool_uses:
+                ctx.active_tool_uses[tool_use_id] = (tool_name, time.monotonic())
+                ctx.tool_use_parents[tool_use_id] = msg.parent_tool_use_id
+            if tool_name == "Agent" and not msg.parent_tool_use_id:
+                await _announce_agent_tool_use(
+                    ctx,
+                    channel,
+                    tool_use_id,
+                    getattr(block_any, "input", None),
+                )
+
     if session.agent_log:
         for block in msg.content or []:
             block_any: Any = block
             if hasattr(block, "text"):
                 session.agent_log.info("ASSISTANT: %s", block_any.text[:2000])
-            elif hasattr(block, "type") and block_any.type == "tool_use":
+            elif hasattr(block, "id") and hasattr(block, "name") and hasattr(block, "input"):
                 session.agent_log.info(
                     "TOOL_USE: %s(%s)",
                     block_any.name,
-                    json.dumps(block_any.input)[:500] if hasattr(block, "input") else "",
+                    json.dumps(block_any.input)[:500],
                 )
 
 
@@ -746,6 +917,16 @@ async def _handle_result_message(
 
     assert _set_session_id_fn is not None
     await _set_session_id_fn(session, msg, channel=channel)
+    usage = msg.usage if isinstance(msg.usage, dict) else {}
+    model = ctx.current_model or session.model or None
+    observe_llm_result(
+        model=model,
+        outcome="error" if msg.is_error else "ok",
+        duration_ms=msg.duration_ms,
+        api_duration_ms=msg.duration_api_ms,
+        usage=usage,
+        total_cost_usd=msg.total_cost_usd,
+    )
     _record_session_usage(session.name, msg)
 
 
@@ -763,7 +944,80 @@ async def _handle_system_message(
     """Handle a SystemMessage during response streaming."""
     if session.agent_log:
         session.agent_log.debug("SYSTEM_MSG: subtype=%s data=%s", msg.subtype, json.dumps(msg.data)[:500])
-    if msg.subtype == "status" and msg.data.get("status") == "compacting":
+    if msg.subtype == "task_started":
+        if ctx is None:
+            return
+        task_id = str(msg.data.get("task_id") or "")
+        if not task_id:
+            return
+        description = msg.data.get("description") or "subagent"
+        task_type = msg.data.get("task_type") or "unknown"
+        tool_use_id = msg.data.get("tool_use_id") or "?"
+        parent_agent_tool_use_id = _resolve_parent_agent_tool_use_id(ctx, tool_use_id)
+        prefix = f"`🔧 {task_type}"
+        if parent_agent_tool_use_id:
+            prefix = f"`🔧 [{ctx.agent_context_labels[parent_agent_tool_use_id]}] {task_type}"
+        content = f"{prefix} — {_task_text_preview(description)} ({tool_use_id})`\nStarted task `{task_id}`"
+        if task_id not in ctx.task_start_messages:
+            ctx.task_start_messages[task_id] = await _retry_discord_503(channel.send, content)
+
+    elif msg.subtype == "task_progress":
+        if ctx is None:
+            return
+        task_id = str(msg.data.get("task_id") or "")
+        if not task_id:
+            return
+        description = msg.data.get("description") or "subagent"
+        tool_use_id = msg.data.get("tool_use_id") or "?"
+        parent_agent_tool_use_id = _resolve_parent_agent_tool_use_id(ctx, tool_use_id)
+        usage = msg.data.get("usage") if isinstance(msg.data.get("usage"), dict) else {}
+        tool_uses = usage.get("tool_uses", 0)
+        duration_ms = usage.get("duration_ms", 0)
+        total_tokens = usage.get("total_tokens", 0)
+        last_tool_name = msg.data.get("last_tool_name") or "?"
+        duration_s = duration_ms / 1000 if isinstance(duration_ms, (int, float)) else 0
+        label = f"task progress — {_task_text_preview(description)} ({tool_use_id})"
+        if parent_agent_tool_use_id:
+            label = f"[{ctx.agent_context_labels[parent_agent_tool_use_id]}] task progress — {_task_text_preview(description)} ({tool_use_id})"
+        content = (
+            f"`🔧 {label}`\n"
+            f"Task `{task_id}` | {tool_uses} tools | {total_tokens} tokens | {duration_s:.1f}s | last tool: `{last_tool_name}`"
+        )
+        await _upsert_task_status(ctx, channel, task_id, content)
+
+    elif msg.subtype == "task_notification":
+        if ctx is None:
+            return
+        task_id = str(msg.data.get("task_id") or "")
+        if not task_id:
+            return
+        status = msg.data.get("status") or "unknown"
+        summary = msg.data.get("summary") or ""
+        output_file = msg.data.get("output_file") or ""
+        tool_use_id = msg.data.get("tool_use_id") or "?"
+        parent_agent_tool_use_id = _resolve_parent_agent_tool_use_id(ctx, tool_use_id)
+        usage = msg.data.get("usage") if isinstance(msg.data.get("usage"), dict) else {}
+        tool_uses = usage.get("tool_uses")
+        duration_ms = usage.get("duration_ms")
+        details: list[str] = []
+        if tool_uses is not None:
+            details.append(f"tools={tool_uses}")
+        if isinstance(duration_ms, (int, float)):
+            details.append(f"duration={duration_ms / 1000:.1f}s")
+        if output_file:
+            details.append(f"output=`{output_file}`")
+        details_str = " | ".join(details)
+        label = f"task {status} ({task_id})"
+        if parent_agent_tool_use_id:
+            label = f"[{ctx.agent_context_labels[parent_agent_tool_use_id]}] task {status} ({task_id})"
+        content = f"`🔧 {label}`"
+        if summary:
+            content += f"\n{_task_text_preview(summary, limit=240)}"
+        if details_str:
+            content += f"\n{details_str}"
+        await _upsert_task_status(ctx, channel, task_id, content)
+
+    elif msg.subtype == "status" and msg.data.get("status") == "compacting":
         # Set compacting flag — prevents interrupts during compaction
         session.compacting = True
         # CLI signals compaction is starting — only notify if we didn't trigger it ourselves
@@ -800,7 +1054,7 @@ async def _handle_system_message(
             ctx.text_buffer = ""
             ctx.suppress_stream = (
                 bool(msg.data.get("data", {}).get("has_output_schema"))
-                and not os.environ.get("FC_SHOW_OUTPUT_SCHEMA", "").lower() in ("1", "true", "yes")
+                and os.environ.get("FC_SHOW_OUTPUT_SCHEMA", "").lower() not in ("1", "true", "yes")
             )
         data = msg.data.get("data", {})
         block_name = data.get("block_name", "?")
@@ -849,6 +1103,10 @@ async def _handle_system_message(
         status = "**completed**" if data.get("status") == "completed" else "**failed**"
         assert _send_system is not None
         await _send_system(channel, f"Flowchart {status} in {duration_s:.0f}s | Cost: ${cost:.4f} | Blocks: {blocks}")
+        test_sentinel = os.environ.get("AXI_TEST_SENTINEL")
+        if test_sentinel:
+            assert _send_long is not None
+            await _send_long(channel, test_sentinel)
         # Persist inner Claude's session_id so resume works after flowchart turns.
         # Only persist from successful runs — failed runs generate phantom
         # session_ids that don't have conversation data on disk, causing an
@@ -894,7 +1152,7 @@ async def _stall_watchdog(
         try:
             await asyncio.wait_for(done.wait(), timeout=_STALL_WARN_SECS)
             return  # stream finished normally
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         elapsed = time.monotonic() - t_last_event[0]
         if elapsed >= _STALL_WARN_SECS:
@@ -956,6 +1214,8 @@ async def stream_response_to_channel(session: AgentSession, channel: TextChannel
                 await _handle_stream_event(ctx, session, channel, msg, typing_ctx)
             elif isinstance(msg, AssistantMessage):
                 await _handle_assistant_message(ctx, session, channel, msg, typing_ctx)
+            elif isinstance(msg, UserMessage):
+                await _handle_user_message(ctx, session, msg)
             elif isinstance(msg, ResultMessage):
                 await _handle_result_message(ctx, session, channel, msg, typing_ctx)
             elif isinstance(msg, SystemMessage):
@@ -1017,6 +1277,8 @@ async def stream_response_to_channel(session: AgentSession, channel: TextChannel
         # Stream ended without a ResultMessage — the CLI process was killed
         # (e.g. by /stop) or crashed.  Sleep the agent so the next message
         # triggers a fresh wake with a new CLI process.
+        await _hide_thinking(ctx)
+        _stop_typing(ctx, typing_ctx)
         if ctx.deferred_msg:
             assert _send_long is not None
             await _send_long(channel, ctx.deferred_msg)

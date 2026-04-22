@@ -17,9 +17,15 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
-from axi import config
-
 log = logging.getLogger("axi")
+
+
+def _bot_dir() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _bot_worktrees_dir() -> str:
+    return os.environ.get("AXI_WORKTREES_DIR", os.path.join(os.path.expanduser("~"), "axi-tests"))
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +101,7 @@ def is_git_repo(path: str) -> bool:
 
 def create_worktree(name: str, source_repo: str | None = None) -> str | None:
     """Create a git worktree for an axi-dev agent. Returns worktree path or None on failure."""
-    worktree_path = os.path.join(config.BOT_WORKTREES_DIR, name)
+    worktree_path = os.path.join(_bot_worktrees_dir(), name)
 
     if os.path.isdir(worktree_path):
         # Check if it's already a valid git worktree
@@ -108,7 +114,7 @@ def create_worktree(name: str, source_repo: str | None = None) -> str | None:
         return None
 
     # Resolve the parent repo: use source_repo if provided, else fall back to BOT_DIR
-    parent_repo = config.BOT_DIR
+    parent_repo = _bot_dir()
     if source_repo:
         result = subprocess.run(
             ["git", "-C", source_repo, "rev-parse", "--show-toplevel"],
@@ -375,7 +381,7 @@ def execute_merge(main_repo: str, branch: str, message: str | None = None) -> tu
 def is_auto_worktree(cwd: str) -> bool:
     """Check if cwd is an auto-created worktree under BOT_WORKTREES_DIR."""
     try:
-        return os.path.realpath(cwd).startswith(os.path.realpath(config.BOT_WORKTREES_DIR) + os.sep)
+        return os.path.realpath(cwd).startswith(os.path.realpath(_bot_worktrees_dir()) + os.sep)
     except (OSError, ValueError):
         return False
 

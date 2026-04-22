@@ -62,8 +62,10 @@ __all__ = [
     "intents",
     "load_mcp_servers",
     "log",
+    "normalize_model",
     "set_model",
     "uses_chatgpt_proxy",
+    "validate_model",
 ]
 
 import json
@@ -99,13 +101,11 @@ class _ColorFormatter(logging.Formatter):
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
-# ---------------------------------------------------------------------------
-# Logging setup
-# ---------------------------------------------------------------------------
-
+from axi.discord_wire import emit_rest_audit_event
+from axi.egress_filter import scrub_secrets
 from axi.log_context import StructuredContextFilter
+
+load_dotenv()
 
 log = logging.getLogger("axi")
 log.setLevel(logging.DEBUG)
@@ -402,6 +402,20 @@ def _normalize_model_selector(model: str) -> str:
     return LEGACY_MODEL_ALIASES.get(lower, model)
 
 
+def normalize_model(model: str) -> str:
+    return _normalize_model_selector(model)
+
+
+def validate_model(model: str) -> str:
+    normalized = _normalize_model_selector(model)
+    if not _is_valid_model_name(normalized):
+        return (
+            f"Invalid model '{model}'. Use a Claude alias like "
+            f"{', '.join(sorted(VALID_MODELS))} or a provider model ID like gpt-5.4."
+        )
+    return ""
+
+
 def _is_valid_model_name(model: str) -> bool:
     return bool(model and _MODEL_NAME_RE.fullmatch(model))
 
@@ -438,11 +452,11 @@ def get_model_runtime(model: str) -> tuple[str | None, dict[str, str]]:
     return resolved, {}
 
 
-def get_resolved_model() -> tuple[str, str | None, dict[str, str]]:
-    """Return the configured Axi model along with resolved Claude runtime settings."""
-    model = get_model()
-    resolved_model, env = get_model_runtime(model)
-    return model, resolved_model, env
+def get_resolved_model(model: str | None = None) -> tuple[str, str | None, dict[str, str]]:
+    """Return an Axi model along with resolved Claude runtime settings."""
+    resolved_input = get_model() if model is None else _normalize_model_selector(model)
+    resolved_model, env = get_model_runtime(resolved_input)
+    return resolved_input, resolved_model, env
 
 
 def _load_config() -> dict[str, Any]:
@@ -483,11 +497,9 @@ def get_model() -> str:
 def set_model(model: str) -> str:
     """Set the model preference. Returns validation error string or empty string on success."""
     normalized = _normalize_model_selector(model)
-    if not _is_valid_model_name(normalized):
-        return (
-            f"Invalid model '{model}'. Use a Claude alias like "
-            f"{', '.join(sorted(VALID_MODELS))} or a provider model ID like gpt-5.4."
-        )
+    error = validate_model(normalized)
+    if error:
+        return error
     with _config_lock:
         config = _load_config()
         config["model"] = normalized
@@ -549,10 +561,19 @@ KILLED_CATEGORY_NAME = "Killed"
 # Discord REST API client
 # ---------------------------------------------------------------------------
 
+from axi.metrics import observe_discord_rest_request
 from discordquery import AsyncDiscordClient
 
-discord_client = AsyncDiscordClient(DISCORD_TOKEN)
-
-from axi.egress_filter import scrub_secrets
+discord_client = AsyncDiscordClient(
+    DISCORD_TOKEN,
+    on_request_observer=lambda method, path, status, duration: observe_discord_rest_request(
+        "discordquery",
+        method,
+        path,
+        status,
+        duration,
+    ),
+)
 
 discord_client.content_filter = scrub_secrets
+discord_client.audit_hook = emit_rest_audit_event

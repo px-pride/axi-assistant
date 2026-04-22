@@ -248,6 +248,7 @@ dependencies = [
     { name = "claude-agent-sdk" },
     { name = "claudewire" },
     { name = "croniter" },
+    { name = "discord-e2e" },
     { name = "discord-py", extra = ["voice"] },
     { name = "discordquery" },
     { name = "fastapi" },
@@ -258,6 +259,8 @@ dependencies = [
     { name = "opentelemetry-exporter-otlp-proto-grpc" },
     { name = "opentelemetry-sdk" },
     { name = "procmux" },
+    { name = "prometheus-client" },
+    { name = "pydantic" },
     { name = "pynacl" },
     { name = "python-dotenv" },
     { name = "tzdata" },
@@ -273,6 +276,7 @@ dev = [
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pytest-timeout" },
     { name = "ruff" },
 ]
 
@@ -283,6 +287,7 @@ requires-dist = [
     { name = "claude-agent-sdk" },
     { name = "claudewire", git = "https://github.com/leroux/claudewire.git?subdirectory=py&rev=1f940d89e1a1db8217f997f9dc77063a3738fd36" },
     { name = "croniter" },
+    { name = "discord-e2e", editable = "packages/discord_e2e" },
     { name = "discord-py", extras = ["voice"], specifier = ">=2.7" },
     { name = "discordquery", editable = "packages/discordquery" },
     { name = "fastapi", specifier = ">=0.115" },
@@ -292,7 +297,9 @@ requires-dist = [
     { name = "opentelemetry-api", specifier = ">=1.20" },
     { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.20" },
     { name = "opentelemetry-sdk", specifier = ">=1.20" },
-    { name = "procmux", editable = "packages/procmux" },
+    { name = "procmux", git = "https://github.com/leroux/procmux.git?subdirectory=py&rev=88cc1eb91bf91b2653905e8a836abb15999e017d" },
+    { name = "prometheus-client", specifier = ">=0.22" },
+    { name = "pydantic", specifier = ">=2.0" },
     { name = "pynacl" },
     { name = "python-dotenv" },
     { name = "tzdata", specifier = ">=2025.3" },
@@ -308,6 +315,7 @@ dev = [
     { name = "pyright", specifier = ">=1.1.408" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "ruff", specifier = ">=0.15.4" },
 ]
 
@@ -561,6 +569,17 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/89/48/e69d6f6d855f0c6740ff2dde9ebb2f43033431002e1e5a949c8ad47e74f8/davey-0.1.5-cp314-cp314t-musllinux_1_2_i686.whl", hash = "sha256:58d7d412e7dff5e24f59c78c1e8de3690bd765a536d4000addf57004873f12a5", size = 1137332, upload-time = "2026-03-29T02:36:31.658Z" },
     { url = "https://files.pythonhosted.org/packages/bb/3e/e8f2dc2bb56e2b1916cbc098f85f8f10952ead41b5f965ea56cf8fec35ad/davey-0.1.5-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:f853461bd751b6b47f0ca6fdb53d7d4b37a429d22a1749ada32881cfb00fbddb", size = 1129624, upload-time = "2026-03-29T02:36:52.073Z" },
 ]
+
+[[package]]
+name = "discord-e2e"
+version = "0.1.0"
+source = { editable = "packages/discord_e2e" }
+dependencies = [
+    { name = "discordquery" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "discordquery" }]
 
 [[package]]
 name = "discord-py"
@@ -1293,13 +1312,19 @@ wheels = [
 [[package]]
 name = "procmux"
 version = "0.1.0"
-source = { editable = "packages/procmux" }
+source = { git = "https://github.com/leroux/procmux.git?subdirectory=py&rev=88cc1eb91bf91b2653905e8a836abb15999e017d#88cc1eb91bf91b2653905e8a836abb15999e017d" }
 dependencies = [
     { name = "pydantic" },
 ]
 
-[package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2.0" }]
+[[package]]
+name = "prometheus-client"
+version = "0.25.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1b/fb/d9aa83ffe43ce1f19e557c0971d04b90561b0cfd50762aafb01968285553/prometheus_client-0.25.0.tar.gz", hash = "sha256:5e373b75c31afb3c86f1a52fa1ad470c9aace18082d39ec0d2f918d11cc9ba28", size = 86035, upload-time = "2026-04-09T19:53:42.359Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8d/9b/d4b1e644385499c8346fa9b622a3f030dce14cd6ef8a1871c221a17a67e7/prometheus_client-0.25.0-py3-none-any.whl", hash = "sha256:d5aec89e349a6ec230805d0df882f3807f74fd6c1a2fa86864e3c2279059fed1", size = 64154, upload-time = "2026-04-09T19:53:41.324Z" },
+]
 
 [[package]]
 name = "propcache"
@@ -1592,6 +1617,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/90/2c/8af215c0f776415f3590cac4f9086ccefd6fd463befeae41cd4d3f193e5a/pytest_asyncio-1.3.0.tar.gz", hash = "sha256:d7f52f36d231b80ee124cd216ffb19369aa168fc10095013c6b014a34d3ee9e5", size = 50087, upload-time = "2025-11-10T16:07:47.256Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e5/35/f8b19922b6a25bc0880171a2f1a003eaeb93657475193ab516fd87cac9da/pytest_asyncio-1.3.0-py3-none-any.whl", hash = "sha256:611e26147c7f77640e6d0a92a38ed17c3e9848063698d5c93d5aa7aa11cebff5", size = 15075, upload-time = "2025-11-10T16:07:45.537Z" },
+]
+
+[[package]]
+name = "pytest-timeout"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/82/4c9ecabab13363e72d880f2fb504c5f750433b2b6f16e99f4ec21ada284c/pytest_timeout-2.4.0.tar.gz", hash = "sha256:7e68e90b01f9eff71332b25001f85c75495fc4e3a836701876183c4bcfd0540a", size = 17973, upload-time = "2025-05-05T19:44:34.99Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/b6/3127540ecdf1464a00e5a01ee60a1b09175f6913f0644ac748494d9c4b21/pytest_timeout-2.4.0-py3-none-any.whl", hash = "sha256:c42667e5cdadb151aeb5b26d114aff6bdf5a907f176a007a30b940d3d865b5c2", size = 14382, upload-time = "2025-05-05T19:44:33.502Z" },
 ]
 
 [[package]]

@@ -87,8 +87,10 @@ from axi.discord_ui import (  # noqa: F401
     parse_question_answer,
     resolve_reaction_answer,
 )
+from axi.discord_wire import audited_channel_send, log_discordpy_reaction
 from axi.extensions import DEFAULT_EXTENSIONS, resolve_extension_hooks, resolve_prompt_hooks
 from axi.log_context import set_agent_context, set_trigger
+from axi.metrics import observe_agent_message_event
 from axi.prompts import (
     compute_prompt_hash,
     make_spawned_agent_system_prompt,
@@ -117,6 +119,8 @@ from axi.tracing import shutdown_tracing
 from procmux import ensure_running as ensure_bridge
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from discord.ext.commands import Bot
 
     from agenthub import AgentHub
@@ -151,6 +155,15 @@ _active_trace_ids: dict[str, str] = {}
 
 _TS_PREFIX_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\] ")
 
+
+def _procmux_list_processes(result: Any) -> dict[str, Any]:
+    processes = getattr(result, "processes", None)
+    if processes is not None:
+        return processes
+    agents = getattr(result, "agents", None)
+    return agents or {}
+
+
 _COMMANDS_DIR = os.path.join(config.BOT_DIR, "commands")
 
 
@@ -175,7 +188,7 @@ def _wrap_content_with_flowchart(content: MessageContent, session: AgentSession)
     """Transform message content to route through a configured FlowCoder wrapper.
 
     - Non-string content (image blocks): returned as-is
-    - //raw prefix: stripped and returned without wrapping
+    - /raw prefix: stripped and returned without wrapping
     - Explicit /commands: returned as-is unless using the legacy soul wrapper
     - AXI_FC_WRAP=off/empty: returned as-is
     - AXI_FC_WRAP=soul: legacy /soul and /soul-flow behavior
@@ -191,9 +204,9 @@ def _wrap_content_with_flowchart(content: MessageContent, session: AgentSession)
 
     raw = _strip_ts(content)
 
-    # //raw bypass — strip prefix and send directly
-    if raw.startswith("//raw"):
-        return raw[5:].lstrip() if len(raw) > 5 else raw
+    # /raw bypass — strip prefix and send directly
+    if raw.startswith("/raw"):
+        return raw[4:].lstrip() if len(raw) > 4 else raw
 
     if wrap_name != "soul":
         if raw.startswith("/") or not _command_exists(wrap_name):
@@ -508,8 +521,10 @@ async def add_reaction(message: discord.Message | None, emoji: str) -> None:
         return
     try:
         await message.add_reaction(emoji)
+        log_discordpy_reaction(message, emoji, operation="reaction.add", outcome="success")
         log.info("Reaction +%s on message %s", emoji, message.id)
     except (discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
+        log_discordpy_reaction(message, emoji, operation="reaction.add", outcome="error", error=f"{type(exc).__name__}: {exc}")
         log.warning("Reaction +%s failed on message %s: %s", emoji, message.id, exc)
 
 
@@ -521,8 +536,10 @@ async def remove_reaction(message: discord.Message | None, emoji: str) -> None:
         assert _bot is not None
         assert _bot.user is not None
         await message.remove_reaction(emoji, _bot.user)
+        log_discordpy_reaction(message, emoji, operation="reaction.remove", outcome="success")
         log.info("Reaction -%s on message %s", emoji, message.id)
     except (discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
+        log_discordpy_reaction(message, emoji, operation="reaction.remove", outcome="error", error=f"{type(exc).__name__}: {exc}")
         log.warning("Reaction -%s failed on message %s: %s", emoji, message.id, exc)
 
 
@@ -681,6 +698,7 @@ async def send_long(channel: TextChannel, text: str) -> discord.Message | None:
     last_msg: discord.Message | None = None
     for i, chunk in enumerate(chunks):
         if chunk:
+            caller = "?"
             if log.isEnabledFor(logging.INFO):
                 caller = "".join(f.name or "?" for f in traceback.extract_stack(limit=4)[:-1])
                 log.info(
@@ -693,7 +711,13 @@ async def send_long(channel: TextChannel, text: str) -> discord.Message | None:
                     chunk[:80],
                 )
             try:
-                last_msg = await _retry_discord_503(channel.send, chunk)
+                last_msg = await audited_channel_send(
+                    channel,
+                    chunk,
+                    retry_fn=_retry_discord_503,
+                    operation="message.create",
+                    details={"chunk_index": i + 1, "chunk_total": len(chunks), "caller": caller},
+                )
             except discord.NotFound:
                 agent_name = channel_to_agent.get(channel.id)
                 if agent_name:
@@ -702,7 +726,12 @@ async def send_long(channel: TextChannel, text: str) -> discord.Message | None:
                     new_ch = await ensure_agent_channel(agent_name, cwd=session.cwd if session else None)
                     if session:
                         discord_state(session).channel_id = new_ch.id
-                    last_msg = await new_ch.send(chunk)
+                    last_msg = await audited_channel_send(
+                        new_ch,
+                        chunk,
+                        operation="message.create",
+                        details={"chunk_index": i + 1, "chunk_total": len(chunks), "caller": caller, "recreated_channel": True},
+                    )
                 else:
                     raise
     return last_msg
@@ -722,7 +751,7 @@ def make_cwd_permission_callback(allowed_cwd: str, session: AgentSession | None 
     """Create a can_use_tool callback that restricts file writes to allowed_cwd and AXI_USER_DATA.
 
     Uses claudewire's compose() to chain stateless policies:
-    1. Block forbidden tools (Skill, EnterWorktree, Task)
+    1. Block forbidden tools (EnterWorktree, Task)
     2. Auto-allow safe tools (TodoWrite, EnterPlanMode)
     3. Interactive hooks (plan approval, user questions) if session provided
     4. CWD restriction (file writes only inside allowed paths)
@@ -751,7 +780,7 @@ def make_cwd_permission_callback(allowed_cwd: str, session: AgentSession | None 
 
     policies = [
         tool_block_policy(
-            {"Skill", "EnterWorktree", "Task"},
+            {"EnterWorktree", "Task"},
             message="Not compatible with Discord-based agent mode. Use text messages to communicate instead.",
         ),
         tool_allow_policy({"TodoWrite", "EnterPlanMode"}),
@@ -859,7 +888,7 @@ def init_shutdown_coordinator() -> None:
     async def _send_goodbye() -> None:
         master_ch = await get_master_channel()
         if master_ch:
-            await master_ch.send("*System:* Shutting down \u2014 see you soon!")
+            await audited_channel_send(master_ch, "*System:* Shutting down — see you soon!", operation="shutdown.goodbye")
 
     bot_ref = _bot
 
@@ -904,7 +933,11 @@ def _reset_session_activity(session: AgentSession) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def create_transport(session: AgentSession, reconnecting: bool = False, can_use_tool=None):
+async def create_transport(
+    session: AgentSession,
+    reconnecting: bool = False,
+    can_use_tool: Callable[..., Any] | None = None,
+):
     """Create a transport for Claude Code agent (bridge or direct).
 
     For flowcoder agents, uses FlowcoderBridgeTransport which unwraps
@@ -946,20 +979,27 @@ def count_awake_agents() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Sleep / wake — delegate to hub lifecycle
+# Sleep / wake — Axi lifecycle on top of the rewritten runtime
 # ---------------------------------------------------------------------------
 
+_wake_lock = asyncio.Lock()
 
 
 async def sleep_agent(session: AgentSession, *, force: bool = False) -> None:
-    """Shut down an agent. Delegates to hub lifecycle.
+    """Shut down an agent and release its scheduler slot."""
+    if not force and session.query_lock.locked():
+        log.debug("Skipping sleep for '%s' — query_lock is held", session.name)
+        return
 
-    If force=False (default), skips sleeping if the agent's query_lock is held.
-    """
-    from agenthub import lifecycle
+    if session.client is None:
+        return
 
-    assert hub is not None
-    await lifecycle.sleep_agent(hub, session, force=force)
+    session.bridge_busy = False
+    if session.transport is not None:
+        session.transport = None
+    await _disconnect_client(session.client, session.name)
+    session.client = None
+    scheduler.release_slot(session.name)
     schedule_status_update()
 
 
@@ -982,13 +1022,10 @@ async def graceful_interrupt(session: AgentSession) -> bool:
 
 
 async def wake_agent(session: AgentSession) -> None:
-    """Wake a sleeping agent. Delegates core lifecycle to hub, then handles Discord post-wake."""
-    from agenthub import lifecycle
-    # Check cwd exists before attempting wake
+    """Wake a sleeping agent, then run Discord-specific post-wake logic."""
     if session.cwd and not os.path.isdir(session.cwd):
         log.error("Agent '%s' cwd does not exist: %s", session.name, session.cwd)
         raise ValueError(f"Agent '{session.name}' working directory no longer exists: {session.cwd}")
-
 
     assert _bot is not None
     assert hub is not None
@@ -997,7 +1034,40 @@ async def wake_agent(session: AgentSession) -> None:
         return
 
     resume_id = session.session_id
-    await lifecycle.wake_agent(hub, session)
+
+    async with _wake_lock:
+        if is_awake(session):
+            return
+
+        await scheduler.request_slot(session.name)
+        try:
+            options = hub.make_agent_options(session, resume_id)
+            client = await hub.create_client(session, options)
+            session.client = client
+            session.last_failed_resume_id = None
+        except Exception:
+            if resume_id:
+                log.warning(
+                    "Failed to resume agent '%s' with session_id=%s, retrying fresh",
+                    session.name,
+                    resume_id,
+                )
+                options = hub.make_agent_options(session, None)
+                try:
+                    client = await hub.create_client(session, options)
+                except Exception:
+                    scheduler.release_slot(session.name)
+                    raise
+                session.client = client
+                session.session_id = None
+                session.last_failed_resume_id = resume_id
+                log.warning(
+                    "Agent '%s' woke with fresh session (previous context lost)",
+                    session.name,
+                )
+            else:
+                scheduler.release_slot(session.name)
+                raise
 
     # --- Discord-specific post-wake logic ---
 
@@ -1112,6 +1182,7 @@ async def _rebuild_session(name: str, *, cwd: str | None = None, session_id: str
     old_mcp_names = session.mcp_server_names if session else None
     old_excluded = session.extra_excluded_commands if session else []
     old_write_dirs = session.extra_write_dirs if session else []
+    old_model = session.model if session else None
     resolved_cwd = cwd or old_cwd
     prompt = (
         session.system_prompt if session and session.system_prompt else make_spawned_agent_system_prompt(resolved_cwd, agent_name=name)
@@ -1125,12 +1196,13 @@ async def _rebuild_session(name: str, *, cwd: str | None = None, session_id: str
         system_prompt=prompt,
         system_prompt_hash=prompt_hash,
         client=None,
-        session_id=session_id,
         mcp_servers=old_mcp,
         mcp_server_names=old_mcp_names,
         extra_excluded_commands=old_excluded,
         extra_write_dirs=old_write_dirs,
+        model=old_model,
     )
+    new_session.session_id = session_id
     discord_state(new_session).channel_id = old_channel_id
     agents[name] = new_session
     return new_session
@@ -1186,7 +1258,7 @@ async def reconstruct_agents_from_channels() -> int:
             mcp_servers = _build_mcp_servers(agent_name, cwd, extra_mcp_servers=extra_mcp)
 
             # Resolve sandbox customizations from extensions
-            from axi.extensions import resolve_extension_sandbox, DEFAULT_EXTENSIONS
+            from axi.extensions import DEFAULT_EXTENSIONS, resolve_extension_sandbox
             resolved_ext = list(saved_ext) if saved_ext is not None else list(DEFAULT_EXTENSIONS)
             ext_excluded, ext_write_dirs = resolve_extension_sandbox(resolved_ext)
 
@@ -1201,24 +1273,25 @@ async def reconstruct_agents_from_channels() -> int:
                 cwd=cwd,
                 system_prompt=prompt,
                 system_prompt_hash=old_prompt_hash,
-                session_id=session_id,
                 mcp_servers=mcp_servers,
                 extra_excluded_commands=ext_excluded,
                 extra_write_dirs=ext_write_dirs,
                 model=saved_model,
             )
+            session.session_id = session_id
             ds = discord_state(session)
             ds.channel_id = ch.id
             ds.todo_items = load_todo_items(agent_name)
             # Late-substitute channel info into system prompt
-            if isinstance(session.system_prompt, dict) and "append" in session.system_prompt:
-                session.system_prompt["append"] = (
-                    session.system_prompt["append"]
-                    .replace("{channel_id}", str(ch.id))
-                    .replace("{channel_name}", ch.name)
-                    .replace("{guild_id}", str(ch.guild.id))
-                    .replace("{guild_name}", ch.guild.name)
-                )
+            if isinstance(session.system_prompt, dict):
+                append_text = session.system_prompt.get("append")
+                if isinstance(append_text, str):
+                    session.system_prompt["append"] = (
+                        append_text.replace("{channel_id}", str(ch.id))
+                        .replace("{channel_name}", _channels_mod.strip_status_prefix(ch.name))
+                        .replace("{guild_id}", str(ch.guild.id))
+                        .replace("{guild_name}", ch.guild.name)
+                    )
             agents[agent_name] = session
             channel_to_agent[ch.id] = agent_name
             reconstructed += 1
@@ -1379,7 +1452,12 @@ async def _maybe_compact(session: AgentSession, channel: TextChannel) -> None:
         usage_pct * 100, cmd[:80],
     )
 
-    await _retry_discord_503(channel.send, f"\U0001f504 Context at {usage_pct:.0%} ({pre_tokens:,} tokens) \u2014 compacting...")
+    await audited_channel_send(
+        channel,
+        f"\U0001f504 Context at {usage_pct:.0%} ({pre_tokens:,} tokens) — compacting...",
+        retry_fn=_retry_discord_503,
+        operation="context.compacting",
+    )
     _self_compacting.add(session.name)
     _compact_start_times[session.name] = time.monotonic()
     session.compacting = True
@@ -1499,12 +1577,14 @@ async def restart_agent(name: str) -> AgentSession:
         await sleep_agent(session, force=True)
     agent_cfg = _load_agent_config(name)
     saved_ext = agent_cfg.get("extensions")
+    session.model = agent_cfg.get("model")
     new_prompt = make_spawned_agent_system_prompt(
         session.cwd, extensions=saved_ext, compact_instructions=session.compact_instructions, agent_name=name
     )
     session.system_prompt = new_prompt
     session.system_prompt_hash = compute_prompt_hash(new_prompt)
     session.session_id = session_id
+    _save_agent_config(name, session.mcp_server_names, extensions=saved_ext, model=session.model)
     discord_state(session).system_prompt_posted = False
     log.info("Agent '%s' restarted (session=%s)", name, session_id)
     return session
@@ -1579,7 +1659,7 @@ async def spawn_agent(
         prompt = make_spawned_agent_system_prompt(cwd, extensions=extensions, compact_instructions=compact_instructions, agent_name=name)
 
         # Merge sandbox customizations: explicit params + extension meta.json
-        from axi.extensions import resolve_extension_sandbox, DEFAULT_EXTENSIONS
+        from axi.extensions import DEFAULT_EXTENSIONS, resolve_extension_sandbox
         resolved_ext = extensions if extensions is not None else DEFAULT_EXTENSIONS
         ext_excluded, ext_write_dirs = resolve_extension_sandbox(resolved_ext)
         merged_excluded = list(excluded_commands or []) + ext_excluded
@@ -1597,24 +1677,27 @@ async def spawn_agent(
             system_prompt=prompt,
             system_prompt_hash=compute_prompt_hash(prompt),
             mcp_server_names=mcp_names,
-            session_id=resume,
             mcp_servers=mcp_servers,
             compact_instructions=compact_instructions,
+            startup_command=command or None,
+            startup_command_args=command_args,
             extra_excluded_commands=merged_excluded,
             extra_write_dirs=merged_write_dirs,
             model=model,
         )
+        session.session_id = resume
         discord_state(session).channel_id = channel.id
 
         # Late-substitute channel info into system prompt (not available at build time)
-        if isinstance(session.system_prompt, dict) and "append" in session.system_prompt:
-            session.system_prompt["append"] = (
-                session.system_prompt["append"]
-                .replace("{channel_id}", str(channel.id))
-                .replace("{channel_name}", channel.name)
-                .replace("{guild_id}", str(channel.guild.id))
-                .replace("{guild_name}", channel.guild.name)
-            )
+        if isinstance(session.system_prompt, dict):
+            append_text = session.system_prompt.get("append")
+            if isinstance(append_text, str):
+                session.system_prompt["append"] = (
+                    append_text.replace("{channel_id}", str(channel.id))
+                    .replace("{channel_name}", _channels_mod.strip_status_prefix(channel.name))
+                    .replace("{guild_id}", str(channel.guild.id))
+                    .replace("{guild_name}", channel.guild.name)
+                )
 
         agents[name] = session
 
@@ -1672,10 +1755,32 @@ async def send_prompt_to_agent(agent_name: str, prompt: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _initial_agent_message(session: AgentSession, prompt: MessageContent) -> MessageContent:
+    """Build the first message for a spawned agent."""
+    if (
+        session.agent_type == "flowcoder"
+        and config.FLOWCODER_ENABLED
+        and session.startup_command
+        and isinstance(prompt, str)
+    ):
+        command = session.startup_command
+        command_args = session.startup_command_args
+        session.startup_command = None
+        session.startup_command_args = ""
+        slash = f"/{command.lstrip('/')}"
+        if command_args:
+            slash += f" {command_args}"
+        if prompt:
+            slash += f" {prompt}"
+        return slash
+    return prompt
+
+
 async def run_initial_prompt(session: AgentSession, prompt: MessageContent, channel: TextChannel) -> None:
     """Run the initial prompt for a spawned agent."""
     set_agent_context(session.name, channel_id=channel.id)
     set_trigger("initial_prompt")
+    prompt = _initial_agent_message(session, prompt)
     with _tracer.start_as_current_span(
         "run_initial_prompt",
         attributes={
@@ -1750,12 +1855,16 @@ async def run_initial_prompt(session: AgentSession, prompt: MessageContent, chan
 async def process_message_queue(session: AgentSession) -> None:
     """Process any queued messages for an agent after the current query finishes."""
     if session.message_queue:
+        observe_agent_message_event("queue_process_start")
         log.info("QUEUE[%s] processing %d queued messages", session.name, len(session.message_queue))
         _tracer.start_span(
             "process_message_queue",
             attributes={"agent.name": session.name, "queue.size": len(session.message_queue)},
         ).end()  # mark event; individual messages are traced via process_message
     while session.message_queue:
+        if session.state.stop_requested:
+            session.state.stop_requested = False
+            break
         if hub and hub.shutdown_requested:
             log.info("Shutdown requested \u2014 not processing further queued messages for '%s'", session.name)
             break
@@ -1765,6 +1874,7 @@ async def process_message_queue(session: AgentSession) -> None:
             await sleep_agent(session)
             return
         content, channel, orig_message, *rest = session.message_queue.popleft()
+        observe_agent_message_event("queue_dequeued")
         raw_content = rest[0] if rest else content
 
         remaining = len(session.message_queue)
@@ -1821,6 +1931,7 @@ async def process_message_queue(session: AgentSession) -> None:
                 )
             finally:
                 session.activity = ActivityState(phase="idle")
+    session.state.stop_requested = False
 
 
 # ---------------------------------------------------------------------------
@@ -1977,7 +2088,7 @@ async def connect_procmux() -> None:
 
         try:
             result = await procmux_conn.send_command("list")
-            bridge_agents = result.agents or {}
+            bridge_agents = _procmux_list_processes(result)
             log.info("Bridge reports %d agent(s): %s", len(bridge_agents), list(bridge_agents.keys()))
             span.set_attribute("procmux.agents_found", len(bridge_agents))
         except Exception:
