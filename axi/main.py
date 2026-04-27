@@ -2662,9 +2662,24 @@ def _register_egress_snowflakes(bot: discord.Client) -> None:
 
 def _register_egress_startup_secrets() -> None:
     """Scan the bot's repo root for .env files and register their values."""
-    from axi.egress_filter import register_secrets_from_dir
+    from axi.egress_filter import register_literal_secrets, register_secrets_from_dir
 
     register_secrets_from_dir(config.BOT_DIR)
+
+    # Register the proxy bearer token so it never appears verbatim in any
+    # Discord message, log, or transcript that flows through the egress
+    # filter. Only wire it up if the file actually exists — fresh installs
+    # without the proxy configured won't have one yet.
+    token_path = os.environ.get("AXI_PROXY_TOKEN_FILE", "").strip() or config.PROXY_TOKEN_DEFAULT_PATH
+    token_path = os.path.expanduser(token_path)
+    if os.path.exists(token_path):
+        try:
+            with open(token_path) as f:
+                token = f.read().strip()
+            if token:
+                register_literal_secrets([token])
+        except OSError as exc:
+            log.warning("Egress filter: could not register proxy token: %s", exc)
 
 
 async def _setup_guild_infrastructure(master_session: AgentSession) -> None:

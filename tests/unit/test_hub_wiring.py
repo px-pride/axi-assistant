@@ -13,13 +13,18 @@ class TestMakeAgentOptionsModelSelection:
     def test_session_model_override_is_resolved_for_runtime(self) -> None:
         session = AgentSession(name="test", cwd="/tmp", model="gpt-5.4")
 
-        with patch("axi.agents.make_stderr_callback", return_value=None):
+        with (
+            patch("axi.agents.make_stderr_callback", return_value=None),
+            # Provide the proxy api key via env so the resolver doesn't try to
+            # read the per-install token file (which doesn't exist in tests).
+            patch.dict(os.environ, {"AXI_CHATGPT_PROXY_API_KEY": "test-token"}),
+        ):
             options = _make_agent_options(session, resume_id=None)
 
         assert options.model is None
         assert options.env["ANTHROPIC_MODEL"] == "gpt-5.4"
         assert options.env["ANTHROPIC_BASE_URL"]
-        assert options.env["ANTHROPIC_API_KEY"]
+        assert options.env["ANTHROPIC_API_KEY"] == "test-token"
 
     def test_global_model_is_used_when_session_model_is_unset(self) -> None:
         session = AgentSession(name="test", cwd="/tmp")

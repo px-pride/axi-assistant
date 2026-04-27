@@ -373,12 +373,38 @@ _MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9._:/-]+$")
 _CHATGPT_PROXY_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "o5")
 
 CHATGPT_PROXY_DEFAULT_ENV = {
-    "ANTHROPIC_API_KEY": "test",
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:3000",
     "ANTHROPIC_MODEL": "gpt-5.4",
 }
 # Backwards-compatible import name for older tests/extensions.
 CODEX_PROXY_ENV = dict(CHATGPT_PROXY_DEFAULT_ENV)
+
+# Default location for the auto-generated proxy bearer token, overridable via
+# AXI_PROXY_TOKEN_FILE. Kept in sync with scripts/anthropic-codex-proxy/_proxy_auth.py.
+PROXY_TOKEN_DEFAULT_PATH = os.path.expanduser("~/.config/axi/proxy-token")
+
+
+def _load_proxy_token() -> str:
+    """Read the per-install proxy bearer token from disk.
+
+    Override path with AXI_PROXY_TOKEN_FILE. Raises a clear error if the file
+    is missing — the launcher (anthropic-proxy-codex) generates it on first
+    start; a missing file means the proxy was never started for this user.
+    """
+    path = os.environ.get("AXI_PROXY_TOKEN_FILE", "").strip() or PROXY_TOKEN_DEFAULT_PATH
+    path = os.path.expanduser(path)
+    if not os.path.exists(path):
+        raise RuntimeError(
+            f"AXI_MODEL is a gpt-* model but the proxy token file {path} does "
+            f"not exist. Start the proxy with "
+            f"'scripts/anthropic-codex-proxy/anthropic-proxy-codex-service start' "
+            f"(or set AXI_PROXY_TOKEN_FILE to point at an existing token)."
+        )
+    with open(path) as f:
+        token = f.read().strip()
+    if not token:
+        raise RuntimeError(f"Proxy token file {path} is empty.")
+    return token
 
 
 _config_lock = threading.Lock()
@@ -435,11 +461,12 @@ def _chatgpt_proxy_env(model: str) -> dict[str, str]:
         or os.environ.get("ANTHROPIC_BASE_URL")
         or CHATGPT_PROXY_DEFAULT_ENV["ANTHROPIC_BASE_URL"]
     )
-    proxy_api_key = (
-        os.environ.get("AXI_CHATGPT_PROXY_API_KEY")
-        or os.environ.get("ANTHROPIC_API_KEY")
-        or CHATGPT_PROXY_DEFAULT_ENV["ANTHROPIC_API_KEY"]
-    )
+    # Override chain: AXI_CHATGPT_PROXY_API_KEY > ANTHROPIC_API_KEY > token file.
+    # The token file is the production path; the env overrides exist so tests
+    # and ad-hoc debugging can bypass the file.
+    proxy_api_key = os.environ.get("AXI_CHATGPT_PROXY_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+    if not proxy_api_key:
+        proxy_api_key = _load_proxy_token()
     return {
         "ANTHROPIC_API_KEY": proxy_api_key,
         "ANTHROPIC_BASE_URL": proxy_base_url,

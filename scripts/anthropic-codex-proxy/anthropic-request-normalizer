@@ -11,12 +11,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, ClassVar
+
+# Allow importing the sibling _proxy_auth module whether the script is run
+# from scripts/anthropic-codex-proxy/ in the repo or from ~/.local/bin after
+# install.sh has copied both files.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _proxy_auth
 
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -130,19 +137,46 @@ def normalize_anthropic_request(body: Any) -> Any:
 
 
 class Handler(BaseHTTPRequestHandler):
-    target = ""
+    target: ClassVar[str] = ""
+    expected_token: ClassVar[str] = ""
+    allowed_hosts: ClassVar[set[str]] = set()
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write(f"[{self.log_date_time_string()}] {fmt % args}\n")
 
+    def _authorize(self) -> bool:
+        if not _proxy_auth.check_host_header(self, self.allowed_hosts):
+            return False
+        return _proxy_auth.check_token(self, self.expected_token)
+
+    def do_OPTIONS(self) -> None:
+        _proxy_auth.reject_options(self)
+
     def do_GET(self) -> None:
+        # /health is the unauthenticated liveness probe used by the service
+        # wrapper. Returns no information beyond "I am up", so leaving it open
+        # is acceptable. Everything else requires auth.
+        if self.path.rstrip("/") in ("/health", "/v1/health"):
+            payload = b'{"ok":true}'
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        if not self._authorize():
+            return
         self.forward("GET")
 
     def do_HEAD(self) -> None:
+        if not self._authorize():
+            return
         self.send_response(200)
         self.end_headers()
 
     def do_POST(self) -> None:
+        if not self._authorize():
+            return
         length = int(self.headers.get("content-length", "0") or "0")
         raw_body = self.rfile.read(length) if length else b""
         body = raw_body
@@ -170,6 +204,11 @@ class Handler(BaseHTTPRequestHandler):
         if body is not None:
             headers["content-length"] = str(len(body))
         headers["x-anthropic-normalized"] = "tool-result-content"
+        # The inner Rust proxy ignores client auth and uses UPSTREAM_API_KEY
+        # for its own upstream call; strip the client-facing token so it
+        # never leaks past us.
+        headers.pop("x-api-key", None)
+        headers.pop("authorization", None)
 
         req = urllib.request.Request(url, data=body, headers=headers, method=method)
 
@@ -208,6 +247,8 @@ def main() -> int:
     args = parser.parse_args()
 
     Handler.target = args.target
+    Handler.expected_token = _proxy_auth.load_or_create_token()
+    Handler.allowed_hosts = _proxy_auth.allowed_host_values(args.listen_port)
     server = ThreadingHTTPServer((args.listen_host, args.listen_port), Handler)
     sys.stderr.write(
         f"anthropic-request-normalizer listening on "

@@ -92,16 +92,26 @@ class TestModelRuntime:
         assert env == {}
 
     def test_gpt_runtime_uses_proxy_env(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
+        # Provide AXI_CHATGPT_PROXY_API_KEY so the env-override path supplies
+        # the token without touching the on-disk token file.
+        with patch.dict("os.environ", {"AXI_CHATGPT_PROXY_API_KEY": "test-token"}, clear=True):
             resolved_model, env = get_model_runtime("gpt-5.4")
         assert resolved_model is None
-        assert env == CHATGPT_PROXY_DEFAULT_ENV
+        assert env == {
+            "ANTHROPIC_API_KEY": "test-token",
+            "ANTHROPIC_BASE_URL": CHATGPT_PROXY_DEFAULT_ENV["ANTHROPIC_BASE_URL"],
+            "ANTHROPIC_MODEL": "gpt-5.4",
+        }
 
     def test_legacy_codex_runtime_uses_proxy_env(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {"AXI_CHATGPT_PROXY_API_KEY": "test-token"}, clear=True):
             resolved_model, env = get_model_runtime("codex")
         assert resolved_model is None
-        assert env == CHATGPT_PROXY_DEFAULT_ENV
+        assert env == {
+            "ANTHROPIC_API_KEY": "test-token",
+            "ANTHROPIC_BASE_URL": CHATGPT_PROXY_DEFAULT_ENV["ANTHROPIC_BASE_URL"],
+            "ANTHROPIC_MODEL": "gpt-5.4",
+        }
 
     def test_chatgpt_proxy_env_overrides(self) -> None:
         with patch.dict(
@@ -127,13 +137,17 @@ class TestModelRuntime:
 
     def test_get_resolved_model_uses_configured_model(self) -> None:
         with (
-            patch.dict("os.environ", {"AXI_MODEL": ""}),
+            patch.dict("os.environ", {"AXI_MODEL": "", "AXI_CHATGPT_PROXY_API_KEY": "test-token"}),
             patch("axi.config._load_config", return_value={"model": "gpt-5.4"}),
         ):
             axi_model, resolved_model, env = get_resolved_model()
         assert axi_model == "gpt-5.4"
         assert resolved_model is None
-        assert env == CHATGPT_PROXY_DEFAULT_ENV
+        assert env == {
+            "ANTHROPIC_API_KEY": "test-token",
+            "ANTHROPIC_BASE_URL": CHATGPT_PROXY_DEFAULT_ENV["ANTHROPIC_BASE_URL"],
+            "ANTHROPIC_MODEL": "gpt-5.4",
+        }
 
 
 class TestSetModel:

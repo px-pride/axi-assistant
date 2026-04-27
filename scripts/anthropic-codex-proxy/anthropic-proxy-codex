@@ -37,6 +37,23 @@ if [[ ! -r "$auth_json" ]]; then
   exit 1
 fi
 
+proxy_token_file="${AXI_PROXY_TOKEN_FILE:-$HOME/.config/axi/proxy-token}"
+export AXI_PROXY_TOKEN_FILE="$proxy_token_file"
+
+# Load (or generate on first start) the per-install bearer token. The Python
+# helper writes the file atomically with mode 600 and rejects existing files
+# that are world-readable. The token gates inbound requests on the normalizer
+# (port 3000) and the OpenAI shim (port 4057).
+proxy_token="$(AXI_PROXY_TOKEN_FILE="$proxy_token_file" python3 -c "
+import sys
+sys.path.insert(0, '$script_dir')
+import _proxy_auth
+print(_proxy_auth.load_or_create_token())
+")" || {
+  echo "anthropic-proxy-codex: failed to load or generate proxy token at $proxy_token_file" >&2
+  exit 1
+}
+
 codex_api_key="$(python3 - "$auth_json" <<'PY'
 import json
 import sys
@@ -58,7 +75,9 @@ else
   shim_port="${CODEX_CHATGPT_SHIM_PORT:-4057}"
   shim_log="${CODEX_CHATGPT_SHIM_LOG:-/tmp/codex-chatgpt-openai-shim.log}"
   export UPSTREAM_BASE_URL="${UPSTREAM_BASE_URL:-http://127.0.0.1:${shim_port}/v1}"
-  export UPSTREAM_API_KEY="${UPSTREAM_API_KEY:-codex-chatgpt-oauth}"
+  # Rust proxy sends UPSTREAM_API_KEY as Authorization: Bearer to the shim.
+  # Use the proxy_token so the shim's auth check accepts it.
+  export UPSTREAM_API_KEY="${UPSTREAM_API_KEY:-$proxy_token}"
 fi
 export COMPLETION_MODEL="${COMPLETION_MODEL:-gpt-5.4}"
 export REASONING_MODEL="${REASONING_MODEL:-gpt-5.4}"

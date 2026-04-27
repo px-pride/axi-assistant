@@ -77,6 +77,10 @@ do
   install -m 0755 "$script_dir/$script" "$install_dir/$script"
 done
 
+# _proxy_auth.py is a Python module imported by the normalizer and shim, not
+# a runnable script — install it 0644 alongside the executables.
+install -m 0644 "$script_dir/_proxy_auth.py" "$install_dir/_proxy_auth.py"
+
 if [[ "$install_proxy" == "1" ]]; then
   if [[ "$force_proxy" == "1" ]] || ! command -v anthropic-proxy >/dev/null 2>&1; then
     if ! command -v cargo >/dev/null 2>&1; then

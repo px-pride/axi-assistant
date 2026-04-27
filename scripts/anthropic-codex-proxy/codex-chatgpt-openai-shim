@@ -12,6 +12,13 @@ import uuid
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import ClassVar
+
+# Allow importing the sibling _proxy_auth module whether the script is run
+# from scripts/anthropic-codex-proxy/ in the repo or from ~/.local/bin after
+# install.sh has copied both files.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _proxy_auth
 
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 TOKEN_URL = "https://auth.openai.com/oauth/token"
@@ -433,8 +440,10 @@ def parse_completed_response(raw):
 
 
 class Handler(BaseHTTPRequestHandler):
-    auth = None
-    endpoint = CODEX_ENDPOINT
+    auth: ClassVar = None
+    endpoint: ClassVar[str] = CODEX_ENDPOINT
+    expected_token: ClassVar[str] = ""
+    allowed_hosts: ClassVar[set[str]] = set()
 
     def log_message(self, fmt, *args):
         sys.stderr.write(f"[{self.log_date_time_string()}] {fmt % args}\n")
@@ -448,9 +457,22 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
+    def _authorize(self):
+        if not _proxy_auth.check_host_header(self, self.allowed_hosts):
+            return False
+        return _proxy_auth.check_token(self, self.expected_token)
+
+    def do_OPTIONS(self):
+        _proxy_auth.reject_options(self)
+
     def do_GET(self):
+        # Health probe is the only unauthenticated endpoint — used by the
+        # launcher script to wait for the shim to come up. Returns no info
+        # beyond liveness.
         if self.path in ("/health", "/v1/health"):
             self.send_json(200, {"ok": True})
+            return
+        if not self._authorize():
             return
         if self.path.endswith("/models"):
             now = int(time.time())
@@ -650,6 +672,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def do_POST(self):
+        if not self._authorize():
+            return
         if "/chat/completions" not in self.path:
             self.send_json(404, {"error": {"message": "only /v1/chat/completions is supported"}})
             return
@@ -686,6 +710,8 @@ def main():
 
     Handler.auth = CodexAuth(args.auth_json)
     Handler.endpoint = args.endpoint
+    Handler.expected_token = _proxy_auth.load_or_create_token()
+    Handler.allowed_hosts = _proxy_auth.allowed_host_values(args.port)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     sys.stderr.write(f"codex-chatgpt-openai-shim listening on http://{args.host}:{args.port}\n")
     server.serve_forever()
