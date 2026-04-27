@@ -29,6 +29,7 @@
 !/.env.template
 !/.gitignore
 !/.pre-commit-config.yaml
+!/LICENSE
 !/README.md
 !/axi-bot.service
 !/axi-procmux.service
