@@ -251,9 +251,6 @@ async def _get_category_with_room(
     categories.append(cat)
     log.info("Created overflow category '%s'", overflow_name)
 
-    # Re-enforce category positions so overflow slots in correctly
-    await ensure_category_positions()
-
     return cat
 
 
@@ -776,54 +773,6 @@ async def ensure_master_channel_position() -> None:
             log.info("Moved #%s to position 0 in Axi category", normalized)
         except Exception as e:
             log.warning("Failed to move #%s to Axi category: %s", normalized, e)
-
-
-_category_positions_cooldown: float = 0.0
-
-async def ensure_category_positions() -> None:
-    """Ensure category groups are ordered: Axi..., Active..., Killed... (with overflow).
-
-    Position 0 is reserved for #axi-master (uncategorized).
-    Uses the same PATCH /guilds/{guild_id}/channels bulk-update pattern.
-    Cooldown prevents feedback loops from on_guild_channel_update events.
-    """
-    global _category_positions_cooldown
-
-    if target_guild is None:
-        return
-
-    now = time.monotonic()
-    if now - _category_positions_cooldown < 5.0:
-        return
-    _category_positions_cooldown = now
-
-    # Build position list: Axi, Axi 2, ..., Active, Active 2, ..., Killed, Killed 2, ...
-    updates = []
-    pos = 1
-    all_correct = True
-    for group in (axi_categories, active_categories, killed_categories):
-        for cat in group:
-            updates.append({"id": str(cat.id), "position": pos})
-            if cat.position != pos:
-                all_correct = False
-            pos += 1
-
-    if not updates:
-        return
-
-    if all_correct:
-        log.debug("Category positions already correct — skipping PATCH")
-        return
-
-    try:
-        await config.discord_client.request(
-            "PATCH",
-            f"/guilds/{config.DISCORD_GUILD_ID}/channels",
-            json=updates,
-        )
-        log.info("Enforced category positions")
-    except Exception as e:
-        log.warning("Failed to enforce category positions: %s", e)
 
 
 # ---------------------------------------------------------------------------

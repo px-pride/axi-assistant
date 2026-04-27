@@ -2483,9 +2483,8 @@ async def on_guild_channel_update(before: discord.abc.GuildChannel, after: disco
         return
     try:
         await channels.ensure_master_channel_position()
-        await channels.ensure_category_positions()
     except Exception:
-        log.exception("Failed to re-enforce channel/category positions")
+        log.exception("Failed to re-enforce channel position")
 
 
 # ---------------------------------------------------------------------------
@@ -2703,11 +2702,6 @@ async def _setup_guild_infrastructure(master_session: AgentSession) -> None:
         await channels.ensure_master_channel_position()
     except Exception:
         log.exception("Failed to ensure master channel position")
-
-    try:
-        await channels.ensure_category_positions()
-    except Exception:
-        log.exception("Failed to ensure category positions")
 
     try:
         await agents.reconstruct_agents_from_channels()
