@@ -95,35 +95,48 @@ def _make_agent_options(session: AgentSession, resume_id: str | None) -> Any:
 
 
 async def _create_client(session: AgentSession, options: Any) -> Any:
-    """Create a ClaudeSDKClient for a session."""
+    """Create a ClaudeSDKClient for a session.
+
+    The streaming-agent ContextVar is set before ``client.__aenter__()`` so
+    the SDK's internal ``_read_messages`` task captures session.name in its
+    context snapshot.  This is what lets SDK MCP tool handlers
+    (set_channel_status, discord_send_file, etc.) identify the calling
+    agent — those handlers run in tasks dispatched from ``_read_messages``,
+    which inherit the snapshotted context.
+    """
     from axi.agents import create_transport, make_cwd_permission_callback
+    from axi.discord_stream import reset_streaming_agent, set_streaming_agent
 
-    if session.agent_type == "flowcoder" and config.FLOWCODER_ENABLED:
-        from axi.flowcoder import build_engine_cli_args, build_engine_env
+    sa_token = set_streaming_agent(session.name)
+    try:
+        if session.agent_type == "flowcoder" and config.FLOWCODER_ENABLED:
+            from axi.flowcoder import build_engine_cli_args, build_engine_env
 
-        permission_cb = make_cwd_permission_callback(session.cwd, session)
-        transport = await create_transport(session, can_use_tool=permission_cb)
-        if not transport:
-            raise RuntimeError(
-                f"Procmux required for flowcoder agent '{session.name}'"
+            permission_cb = make_cwd_permission_callback(session.cwd, session)
+            transport = await create_transport(session, can_use_tool=permission_cb)
+            if not transport:
+                raise RuntimeError(
+                    f"Procmux required for flowcoder agent '{session.name}'"
+                )
+            cli_args = build_engine_cli_args(options)
+            env = build_engine_env(options)
+            log.info(
+                "Spawning flowcoder engine for '%s': %s",
+                session.name,
+                " ".join(cli_args[:6]) + "...",
             )
-        cli_args = build_engine_cli_args(options)
-        env = build_engine_env(options)
-        log.info(
-            "Spawning flowcoder engine for '%s': %s",
-            session.name,
-            " ".join(cli_args[:6]) + "...",
-        )
-        await transport.spawn(cli_args, env, session.cwd)
-        await transport.subscribe()
-        session.transport = transport
-        client = ClaudeSDKClient(options=options, transport=transport)  # pyright: ignore[reportArgumentType]
+            await transport.spawn(cli_args, env, session.cwd)
+            await transport.subscribe()
+            session.transport = transport
+            client = ClaudeSDKClient(options=options, transport=transport)  # pyright: ignore[reportArgumentType]
+            await client.__aenter__()
+            return client
+
+        client = ClaudeSDKClient(options=options)
         await client.__aenter__()
         return client
-
-    client = ClaudeSDKClient(options=options)
-    await client.__aenter__()
-    return client
+    finally:
+        reset_streaming_agent(sa_token)
 
 
 async def _disconnect_client(client: Any, name: str) -> None:

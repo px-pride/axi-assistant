@@ -2172,8 +2172,17 @@ async def _reconnect_and_drain(session: AgentSession, bridge_info: dict[str, Any
                 env={"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "100", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
             )
 
-            client = ClaudeSDKClient(options=options, transport=transport)  # pyright: ignore[reportArgumentType]
-            await client.__aenter__()
+            # Set streaming-agent ContextVar before __aenter__ so the SDK's
+            # internal _read_messages task (and any tool-dispatch tasks it
+            # spawns) inherit session.name in their context snapshot.  See
+            # axi/discord_stream.py for the full rationale.
+            from axi.discord_stream import reset_streaming_agent, set_streaming_agent
+            sa_token = set_streaming_agent(session.name)
+            try:
+                client = ClaudeSDKClient(options=options, transport=transport)  # pyright: ignore[reportArgumentType]
+                await client.__aenter__()
+            finally:
+                reset_streaming_agent(sa_token)
 
             # NOW subscribe — replayed messages flow into the queue after init.
             sub_result = await transport.subscribe()

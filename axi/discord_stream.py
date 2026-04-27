@@ -19,6 +19,7 @@ import os
 import re
 import time
 import traceback
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -134,10 +135,59 @@ __all__ = [
     "_self_compacting",
     "_update_activity",
     "extract_tool_preview",
+    "get_streaming_agent",
     "interrupt_session",
+    "reset_streaming_agent",
+    "set_streaming_agent",
     "stream_response_to_channel",
     "stream_with_retry",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Streaming agent ContextVar
+# ---------------------------------------------------------------------------
+# Identifies which agent owns the current async task tree.  Read by SDK MCP
+# tools (set_channel_status, clear_channel_status, discord_send_file) that
+# need to know their caller — the SDK MCP server is a shared singleton, so
+# tool handlers don't otherwise receive caller identity.
+#
+# The ContextVar must be set BEFORE ``ClaudeSDKClient.__aenter__()`` runs,
+# because that's where the SDK starts its internal ``_read_messages`` task,
+# which snapshots the calling context.  When the CLI later sends a tool
+# call, the SDK dispatches it via ``_tg.start_soon(_handle_control_request,
+# ...)`` — a new task that inherits ``_read_messages``'s context.  Setting
+# the ContextVar later (e.g. in ``stream_response_to_channel``) would not
+# reach the tool dispatch task because that task already has its own
+# context snapshot.
+#
+# Do NOT substitute LogContext.agent_name — that field is overwritten by
+# set_agent_context() inside tool handlers (e.g. axi_spawn_agent sets it to
+# the spawned agent's name, not the caller's), so it cannot identify the
+# caller reliably.
+_streaming_agent: ContextVar[str | None] = ContextVar("streaming_agent", default=None)
+
+
+def get_streaming_agent() -> str | None:
+    """Return the agent name owning the current async task tree, or None."""
+    return _streaming_agent.get()
+
+
+def set_streaming_agent(name: str) -> Any:
+    """Set the streaming agent in the current async scope.
+
+    Returns the reset token; pass it to ``reset_streaming_agent`` (or call
+    ``ContextVar.reset`` directly) when leaving the scope.
+
+    Call this BEFORE ``ClaudeSDKClient.__aenter__()`` so the SDK's internal
+    tasks inherit the agent name in their context snapshot.
+    """
+    return _streaming_agent.set(name)
+
+
+def reset_streaming_agent(token: Any) -> None:
+    """Reset the streaming agent ContextVar using the token from ``set_streaming_agent``."""
+    _streaming_agent.reset(token)
 
 
 # ---------------------------------------------------------------------------
@@ -1277,6 +1327,14 @@ async def stream_response_to_channel(session: AgentSession, channel: TextChannel
 
     Returns None on success, or an error string for transient errors (for retry).
     """
+    streaming_agent_token = _streaming_agent.set(session.name)
+    try:
+        return await _stream_response_to_channel_impl(session, channel)
+    finally:
+        _streaming_agent.reset(streaming_agent_token)
+
+
+async def _stream_response_to_channel_impl(session: AgentSession, channel: TextChannel) -> str | None:
     stream_id = _next_stream_id(session.name)
     if log.isEnabledFor(logging.INFO):
         caller = "".join(f.name or "?" for f in traceback.extract_stack(limit=4)[:-1])

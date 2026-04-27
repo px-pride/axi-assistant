@@ -26,6 +26,7 @@ from claude_agent_sdk import create_sdk_mcp_server, tool
 from opentelemetry import trace
 
 from axi import agents, channels, config, worktrees
+from axi.discord_stream import get_streaming_agent
 from axi.log_context import set_agent_context, set_trigger
 
 # Max byte size for MCP tool text results.  The Claude CLI hangs when a single
@@ -660,12 +661,15 @@ async def discord_send_file(args: McpArgs) -> McpResult:
     content = args.get("content", "")
     channel_id = args.get("channel_id")
     if not channel_id:
-        # Auto-resolve: find calling agent's channel via query_lock
-        for ch_id, name in agents.channel_to_agent.items():
-            session = agents.agents.get(name)
-            if session and session.client is not None and session.query_lock.locked():
-                channel_id = str(ch_id)
-                break
+        # Auto-resolve: identify the calling agent via the streaming ContextVar,
+        # then look up its channel.  Iterating channel_to_agent + query_lock is
+        # non-deterministic when multiple agents stream concurrently.
+        caller = get_streaming_agent()
+        if caller:
+            for ch_id, name in agents.channel_to_agent.items():
+                if name == caller:
+                    channel_id = str(ch_id)
+                    break
     if not channel_id:
         return {
             "content": [{"type": "text", "text": "Error: could not determine channel. Provide channel_id explicitly."}],
@@ -978,12 +982,7 @@ async def set_channel_status(args: McpArgs) -> McpResult:
     if not config.CHANNEL_STATUS_ENABLED:
         return {"content": [{"type": "text", "text": "Channel status prefixes are not enabled."}]}
 
-    # Find calling agent by checking which agent is currently processing
-    caller: str | None = None
-    for name, session in agents.agents.items():
-        if session.client is not None and session.query_lock.locked():
-            caller = name
-            break
+    caller = get_streaming_agent()
     if not caller:
         return {"content": [{"type": "text", "text": "Error: could not determine calling agent."}], "is_error": True}
 
@@ -1007,11 +1006,7 @@ async def clear_channel_status(args: McpArgs) -> McpResult:
     if not config.CHANNEL_STATUS_ENABLED:
         return {"content": [{"type": "text", "text": "Channel status prefixes are not enabled."}]}
 
-    caller: str | None = None
-    for name, session in agents.agents.items():
-        if session.client is not None and session.query_lock.locked():
-            caller = name
-            break
+    caller = get_streaming_agent()
     if not caller:
         return {"content": [{"type": "text", "text": "Error: could not determine calling agent."}], "is_error": True}
 
